@@ -1,3 +1,5 @@
+// @ts-nocheck
+// $env:Path += ";C:\Program Files\nodejs"
 import React, { useState, useEffect, useMemo, useCallback, createContext, useContext } from 'react';
 import {
   ShoppingBag, Search, User, Menu, X, ChevronRight, ChevronLeft, Star, Heart,
@@ -303,7 +305,6 @@ const generateInitialOrdersAndTransactions = (products, customers) => {
     });
   }
 
-  // Add 50 extra historical/settlement transactions to reach 200
   for (let j = 0; j < 50; j++) {
     const cust = customers[(j * 2) % customers.length];
     const gateway = gateways[j % gateways.length];
@@ -449,13 +450,13 @@ const INITIAL_STORE_CONFIG = {
     secondaryColor: '#f8fafc',
     accentColor: '#2563eb',
     fontFamily: 'Inter, system-ui, sans-serif',
-    buttonStyle: 'rounded', // 'pill' | 'rounded' | 'sharp'
+    buttonStyle: 'rounded',
     borderRadius: '12px',
-    headerLayout: 'centered', // 'left' | 'centered'
-    footerStyle: 'columns', // 'columns' | 'minimal'
+    headerLayout: 'centered',
+    footerStyle: 'columns',
     storeDarkMode: false,
-    cardStyle: 'elevated', // 'elevated' | 'bordered' | 'minimal'
-    density: 'comfortable', // 'comfortable' | 'compact'
+    cardStyle: 'elevated',
+    density: 'comfortable',
   },
   seo: {
     siteTitle: 'AETHER GOODS — Precision Hardware & Modern Lifestyle Store',
@@ -605,11 +606,38 @@ const useStore = () => {
 const AppStateProvider = ({ children }) => {
   const [hydrated, setHydrated] = useState(false);
 
-  // Route state: starts directly on '/store' so the e-commerce storefront is immediately live & interactive
-  const [route, setRoute] = useState('/store');
+  // Sync route state with browser pathname (/admin opens Admin Dashboard, / or /store opens Storefront)
+  const [route, setRouteState] = useState(() => {
+    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')) {
+      return '/admin';
+    }
+    return '/store';
+  });
+
+  const setRoute = useCallback((nextRoute) => {
+    setRouteState(nextRoute);
+    if (typeof window !== 'undefined') {
+      try {
+        window.history.pushState({}, '', nextRoute);
+      } catch (e) {
+        // Ignore pushState restrictions in sandboxed iframe environments
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handlePopState = () => {
+      setRouteState(window.location.pathname.startsWith('/admin') ? '/admin' : '/store');
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
   const [adminSubPage, setAdminSubPage] = useState('dashboard');
   const [storeSubView, setStoreSubView] = useState('home'); // 'home' | 'catalog' | 'product' | 'checkout' | 'confirmation'
   const [selectedProductId, setSelectedProductId] = useState('prod-101');
+  const [recentlyViewedIds, setRecentlyViewedIds] = useState(['prod-101', 'prod-102', 'prod-103', 'prod-106']);
   const [quickViewProductId, setQuickViewProductId] = useState(null);
   const [wishlist, setWishlist] = useState(['prod-101', 'prod-102']);
   const [orderLookupOpen, setOrderLookupOpen] = useState(false);
@@ -711,7 +739,7 @@ const AppStateProvider = ({ children }) => {
       // Ignore quota errors in sandboxed iframes
     }
   }, [hydrated, products, categories, customers, orders, transactions, purchases, discounts, config, cart, wishlist]);
-  // Document Title & Meta reflection from SEO Manager
+
   useEffect(() => {
     if (typeof document !== 'undefined') {
       document.title = config.seo.siteTitle;
@@ -748,7 +776,10 @@ const AppStateProvider = ({ children }) => {
     });
   };
 
-  // Cart Actions
+  const recordRecentlyViewed = useCallback((productId) => {
+    setRecentlyViewedIds((prev) => [productId, ...prev.filter((id) => id !== productId)].slice(0, 4));
+  }, []);
+
   const addToCart = (productId, quantity = 1, color = 'Obsidian Black', size = 'Standard', openDrawer = true) => {
     setCart((prev) => {
       const existingIdx = prev.findIndex(
@@ -783,7 +814,6 @@ const AppStateProvider = ({ children }) => {
     setCart((prev) => prev.filter((_, i) => i !== index));
   };
 
-  // Simulated Checkout Action
   const placeSimulatedOrder = ({ customerDetails, shippingMethod, paymentGateway }) => {
     const cartDetails = cart
       .map((item) => {
@@ -845,7 +875,6 @@ const AppStateProvider = ({ children }) => {
       date: today,
     };
 
-    // Decrement product stock
     setProducts((prev) =>
       prev.map((p) => {
         const ordered = cartDetails.find((c) => c.productId === p.id);
@@ -879,6 +908,8 @@ const AppStateProvider = ({ children }) => {
     setStoreSubView,
     selectedProductId,
     setSelectedProductId,
+    recentlyViewedIds,
+    recordRecentlyViewed,
     quickViewProductId,
     setQuickViewProductId,
     wishlist,
@@ -926,7 +957,7 @@ const AppStateProvider = ({ children }) => {
 };
 
 // ============================================================================
-// 3. REUSABLE UI PRIMITIVES (BADGES, MODALS, TOASTS, DEMO RIBBON)
+// 3. REUSABLE UI PRIMITIVES (BADGES, MODALS, TOASTS)
 // ============================================================================
 
 const StatusBadge = ({ status }) => {
@@ -974,7 +1005,7 @@ const ToastContainer = () => {
       {toasts.map((t) => (
         <div
           key={t.id}
-          className="pointer-events-auto bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-xl rounded-xl p-3.5 border border-slate-800 dark:border-slate-200 flex items-start gap-3 animate-in fade-in slide-in-from-bottom-3"
+          className="pointer-events-auto bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-xl rounded-xl p-3.5 border border-slate-800 dark:border-slate-200 flex items-start gap-3"
         >
           <CheckCircle2 className="w-5 h-5 text-emerald-400 dark:text-emerald-600 shrink-0 mt-0.5" />
           <div className="text-sm">
@@ -1008,149 +1039,11 @@ const Modal = ({ open, onClose, title, subtitle, children, maxWidth = 'max-w-2xl
 };
 
 // ============================================================================
-// 4. LANDING PORTAL (/)
+// 4. CUSTOMER STOREFRONT (/store)
 // ============================================================================
 
-const LandingPortal = () => {
-  const { setRoute, setStoreSubView, setAdminSubPage, products, orders } = useStore();
-
-  return (
-    <div className="min-h-screen bg-slate-950 text-white flex flex-col justify-between relative overflow-hidden">
-      {/* Subtle architectural grid background */}
-      <div
-        className="absolute inset-0 opacity-20 pointer-events-none"
-        style={{
-          backgroundImage: 'radial-gradient(#334155 1px, transparent 1px)',
-          backgroundSize: '28px 28px',
-        }}
-      />
-
-      <header className="relative z-10 max-w-7xl w-full mx-auto px-6 py-6 flex items-center justify-between border-b border-slate-800/80">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-lg tracking-tight">
-            Æ
-          </div>
-          <div>
-            <span className="font-semibold tracking-tight text-lg">AETHER COMMERCE</span>
-            <span className="ml-2.5 text-[11px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 font-medium">
-              Interactive Frontend Demo
-            </span>
-          </div>
-        </div>
-        <div className="hidden sm:flex items-center gap-4 text-xs text-slate-400">
-          <span>Zero Backend • LocalStorage Synced • INR (₹)</span>
-        </div>
-      </header>
-
-      <main className="relative z-10 max-w-5xl w-full mx-auto px-6 py-16 text-center">
-        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-900 border border-slate-800 text-xs text-slate-300 mb-8">
-          <Sparkles className="w-3.5 h-3.5 text-blue-400" />
-          <span>Full-Stack Experience Simulated Client-Side • Real-Time Storefront & Admin Sync</span>
-        </div>
-
-        <h1 className="text-4xl sm:text-6xl font-bold tracking-tight text-white leading-[1.1]">
-          Modern E-Commerce Platform &amp; Merchant Operating System
-        </h1>
-
-        <p className="mt-6 text-base sm:text-lg text-slate-400 max-w-2xl mx-auto leading-relaxed">
-          Explore an interconnected storefront and commerce control center. Place simulated orders, customize live themes and hero banners, manage inventory, configure Indian &amp; global payment gateways, and test Zoho Books ledger synchronization.
-        </p>
-
-        <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
-          <button
-            onClick={() => {
-              setStoreSubView('home');
-              setRoute('/store');
-            }}
-            className="w-full sm:w-auto px-8 py-4 rounded-xl bg-white text-slate-950 font-semibold text-base hover:bg-slate-100 transition flex items-center justify-center gap-2.5 shadow-lg shadow-white/10"
-          >
-            <Store className="w-5 h-5" />
-            <span>View Storefront</span>
-            <ArrowRight className="w-4 h-4" />
-          </button>
-
-          <button
-            onClick={() => {
-              setAdminSubPage('dashboard');
-              setRoute('/admin');
-            }}
-            className="w-full sm:w-auto px-8 py-4 rounded-xl bg-blue-600 text-white font-semibold text-base hover:bg-blue-500 transition flex items-center justify-center gap-2.5 shadow-lg shadow-blue-600/25"
-          >
-            <LayoutDashboard className="w-5 h-5" />
-            <span>Open Admin Dashboard</span>
-            <ArrowRight className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="mt-16 grid grid-cols-2 sm:grid-cols-4 gap-4 text-left">
-          {[
-            { label: 'Catalog Products', value: `${products.length} SKUs`, sub: 'Live editable variants & stock' },
-            { label: 'Simulated Orders', value: `${orders.length} Orders`, sub: 'End-to-end checkout sync' },
-            { label: 'Visual Editors', value: 'Theme & Banner', sub: 'Live split-screen preview' },
-            { label: 'Integrations', value: '4 Gateways + Zoho', sub: 'Razorpay, Stripe, Cashfree' },
-          ].map((stat, idx) => (
-            <div key={idx} className="p-5 rounded-2xl bg-slate-900/70 border border-slate-800/90">
-              <p className="text-xs text-slate-400">{stat.label}</p>
-              <p className="text-xl font-bold text-white mt-1">{stat.value}</p>
-              <p className="text-[11px] text-slate-500 mt-1">{stat.sub}</p>
-            </div>
-          ))}
-        </div>
-      </main>
-
-      <footer className="relative z-10 border-t border-slate-800/80 py-5 px-6 text-center text-xs text-slate-500">
-        Frontend-Only Interactive Demonstration • All product data, customer profiles, and transactions are fictional.
-      </footer>
-    </div>
-  );
-};
-
-// ============================================================================
-// 5. CUSTOMER STOREFRONT (/store)
-// ============================================================================
-
-const StorefrontExperience = ({ embeddedPreview = false }) => {
-  const {
-    setRoute,
-    setAdminSubPage,
-    storeSubView,
-    setStoreSubView,
-    selectedProductId,
-    setSelectedProductId,
-    quickViewProductId,
-    setQuickViewProductId,
-    wishlist,
-    toggleWishlist,
-    orderLookupOpen,
-    setOrderLookupOpen,
-    activeInfoModal,
-    setActiveInfoModal,
-    catalogFilters,
-    setCatalogFilters,
-    products,
-    categories,
-    orders,
-    config,
-    cart,
-    addToCart,
-    updateCartQty,
-    removeCartItem,
-    appliedCoupon,
-    setAppliedCoupon,
-    discounts,
-    cartOpen,
-    setCartOpen,
-    lastPlacedOrder,
-    placeSimulatedOrder,
-    addToast,
-  } = useStore();
-
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [searchInput, setSearchInput] = useState('');
-  const [newsletterEmail, setNewsletterEmail] = useState('');
-  const [wishlistDrawerOpen, setWishlistDrawerOpen] = useState(false);
-  const [trackOrderInput, setTrackOrderInput] = useState('');
-
+const StorefrontProductCard = ({ product, listView = false, embeddedPreview = false, onOpenProduct }) => {
+  const { config, wishlist, toggleWishlist, setQuickViewProductId, addToCart } = useStore();
   const theme = config.theme;
   const isDark = theme.storeDarkMode;
 
@@ -1172,1295 +1065,1488 @@ const StorefrontExperience = ({ embeddedPreview = false }) => {
       ? 'bg-neutral-900/90 border border-neutral-800/80 shadow-lg'
       : 'bg-white border border-slate-100 shadow-sm hover:shadow-md';
 
-  const cartCount = cart.reduce((acc, item) => acc + item.quantity, 0);
+  const discountPct = product.salePrice
+    ? Math.round(((product.price - product.salePrice) / product.price) * 100)
+    : 0;
+  const isSaved = wishlist.includes(product.id);
 
-  const openProductDetail = (productId) => {
-    setSelectedProductId(productId);
-    setStoreSubView('product');
-    if (!embeddedPreview) window.scrollTo({ top: 0, behavior: 'smooth' });
+  return (
+    <div
+      style={{ borderRadius: theme.borderRadius }}
+      className={`group overflow-hidden transition-all duration-200 flex ${
+        listView ? 'flex-col sm:flex-row gap-5 p-4' : 'flex-col'
+      } ${cardStyleClass}`}
+    >
+      <div
+        className={`relative overflow-hidden bg-slate-100 dark:bg-neutral-800 ${
+          listView ? 'w-full sm:w-56 h-52 shrink-0 rounded-lg' : 'aspect-square w-full'
+        }`}
+      >
+        <img
+          onClick={() => onOpenProduct(product.id)}
+          src={product.image}
+          alt={product.name}
+          className="w-full h-full object-cover cursor-pointer group-hover:scale-105 transition-transform duration-500"
+        />
+        <div className="absolute top-3 left-3 flex flex-col gap-1.5 pointer-events-none">
+          {product.badge && (
+            <span
+              style={{ backgroundColor: theme.accentColor }}
+              className="px-2.5 py-0.5 text-[11px] font-semibold text-white rounded-full shadow-xs"
+            >
+              {product.badge}
+            </span>
+          )}
+          {discountPct > 0 && (
+            <span className="px-2 py-0.5 text-[11px] font-semibold bg-emerald-600 text-white rounded-full">
+              -{discountPct}%
+            </span>
+          )}
+        </div>
+
+        {!embeddedPreview && (
+          <div className="absolute top-3 right-3 flex flex-col gap-1.5">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleWishlist(product.id);
+              }}
+              className="w-8 h-8 rounded-full bg-white/90 text-slate-900 shadow-sm flex items-center justify-center hover:scale-105 transition"
+              title={isSaved ? 'Remove from Wishlist' : 'Save to Wishlist'}
+            >
+              <Heart className={`w-4 h-4 ${isSaved ? 'fill-rose-500 text-rose-500' : ''}`} />
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setQuickViewProductId(product.id);
+              }}
+              className="w-8 h-8 rounded-full bg-white/90 text-slate-900 shadow-sm flex items-center justify-center opacity-0 group-hover:opacity-100 hover:scale-105 transition"
+              title="Quick View"
+            >
+              <Eye className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {product.stock <= 5 && product.stock > 0 && (
+          <span className="absolute bottom-2.5 left-2.5 px-2 py-0.5 text-[10px] font-medium bg-amber-500 text-white rounded-md">
+            Only {product.stock} left
+          </span>
+        )}
+        {product.stock === 0 && (
+          <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+            <span className="px-3 py-1 bg-white text-slate-900 text-xs font-bold rounded-full">
+              Out of Stock
+            </span>
+          </div>
+        )}
+      </div>
+
+      <div className={`flex flex-col justify-between flex-1 ${listView ? 'py-1' : theme.density === 'compact' ? 'p-3.5' : 'p-4'}`}>
+        <div>
+          <div className="flex items-center justify-between text-xs opacity-60 mb-1">
+            <span>{product.category} • {product.brand}</span>
+            <span className="flex items-center gap-1">
+              <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+              {product.rating} ({product.reviewCount})
+            </span>
+          </div>
+          <h3
+            onClick={() => onOpenProduct(product.id)}
+            className="font-semibold text-base leading-snug cursor-pointer hover:underline line-clamp-2"
+          >
+            {product.name}
+          </h3>
+          <div className="flex items-center gap-1.5 mt-2">
+            {product.colors.map((col, idx) => (
+              <span
+                key={idx}
+                title={col}
+                className="text-[10px] px-2 py-0.5 rounded bg-current/5 opacity-75"
+              >
+                {col}
+              </span>
+            ))}
+          </div>
+          {listView && (
+            <p className="text-sm opacity-75 mt-2 line-clamp-2">{product.description}</p>
+          )}
+        </div>
+
+        <div className="mt-4 pt-3 border-t border-current/10 flex items-center justify-between gap-2">
+          <div>
+            {product.salePrice ? (
+              <div className="flex items-baseline gap-2">
+                <span className="font-bold text-base">{formatINR(product.salePrice)}</span>
+                <span className="text-xs line-through opacity-50">{formatINR(product.price)}</span>
+              </div>
+            ) : (
+              <span className="font-bold text-base">{formatINR(product.price)}</span>
+            )}
+            <span className="text-[10px] opacity-55 block">Free Express Delivery</span>
+          </div>
+
+          <button
+            type="button"
+            disabled={product.stock === 0}
+            onClick={() => addToCart(product.id, 1, product.colors[0], product.sizes[0], !embeddedPreview)}
+            style={{
+              backgroundColor: product.stock === 0 ? '#94a3b8' : theme.accentColor,
+            }}
+            className={`px-3.5 py-2 text-xs font-semibold text-white transition opacity-95 hover:opacity-100 disabled:cursor-not-allowed flex items-center gap-1.5 ${btnRadiusClass}`}
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Add</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const StorefrontHomepage = ({ embeddedPreview, onOpenProduct, onNavigateCatalog }) => {
+  const { products, categories, config, addToCart, addToast } = useStore();
+  const [newsletterEmail, setNewsletterEmail] = useState('');
+
+  const theme = config.theme;
+  const isDark = theme.storeDarkMode;
+  const btnRadiusClass =
+    theme.buttonStyle === 'pill'
+      ? 'rounded-full'
+      : theme.buttonStyle === 'sharp'
+      ? 'rounded-none'
+      : 'rounded-xl';
+  const cardStyleClass =
+    theme.cardStyle === 'bordered'
+      ? isDark
+        ? 'bg-neutral-900 border border-neutral-800'
+        : 'bg-white border border-slate-200'
+      : theme.cardStyle === 'minimal'
+      ? 'bg-transparent'
+      : isDark
+      ? 'bg-neutral-900/90 border border-neutral-800/80 shadow-lg'
+      : 'bg-white border border-slate-100 shadow-sm hover:shadow-md';
+
+  const activeProducts = products.filter((p) => p.status !== 'Draft');
+  const trendingProducts = activeProducts.filter((p) => p.badge === 'Trending' || p.rating >= 4.7).slice(0, 4);
+  const bestSellers = [...activeProducts].sort((a, b) => b.salesCount - a.salesCount).slice(0, 4);
+  const newArrivals = activeProducts.slice(-4);
+  const featuredCats = categories.filter((c) => c.featured);
+
+  return (
+    <div className="space-y-14 pb-16">
+      <div className="border-b border-current/10 py-3 px-4 sm:px-6 overflow-x-auto">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => onNavigateCatalog('All')}
+              style={{ backgroundColor: theme.accentColor }}
+              className="px-3.5 py-1.5 rounded-full text-xs font-semibold text-white cursor-pointer"
+            >
+              All {activeProducts.length} Products
+            </button>
+            {categories.map((cat) => (
+              <button
+                type="button"
+                key={cat.id}
+                onClick={() => onNavigateCatalog(cat.name)}
+                className="px-3.5 py-1.5 rounded-full text-xs font-medium border border-current/15 hover:border-current/40 transition shrink-0 cursor-pointer"
+              >
+                {cat.name}
+              </button>
+            ))}
+          </div>
+          <div className="hidden xl:flex items-center gap-4 text-xs opacity-70 shrink-0">
+            <span className="flex items-center gap-1"><Truck className="w-3.5 h-3.5" /> 24–48h Metro Dispatch</span>
+            <span className="flex items-center gap-1"><Shield className="w-3.5 h-3.5" /> GST Invoice Ready</span>
+          </div>
+        </div>
+      </div>
+
+      {config.sections.map((section) => {
+        if (!section.visible) return null;
+
+        if (section.id === 'sec-hero') {
+          return (
+            <section key={section.id} className="max-w-7xl mx-auto px-4 sm:px-6">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <div
+                  style={{ borderRadius: theme.borderRadius }}
+                  className="lg:col-span-8 relative overflow-hidden min-h-[420px] sm:min-h-[480px] flex items-center bg-slate-900 text-white"
+                >
+                  <img
+                    src={config.hero.image}
+                    alt="Hero showcase"
+                    className="absolute inset-0 w-full h-full object-cover opacity-55"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/50 to-transparent" />
+                  <div className="relative z-10 max-w-xl px-6 sm:px-10 py-10">
+                    <span
+                      style={{ backgroundColor: theme.accentColor }}
+                      className="inline-block px-3 py-1 text-[11px] font-bold tracking-widest uppercase rounded-full mb-4"
+                    >
+                      {config.hero.eyebrow}
+                    </span>
+                    <h1 className="text-3xl sm:text-5xl font-bold tracking-tight leading-[1.08]">
+                      {config.hero.title}
+                    </h1>
+                    <p className="mt-4 text-sm sm:text-base text-slate-200 leading-relaxed">
+                      {config.hero.subtitle}
+                    </p>
+                    <div className="mt-7 flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => onNavigateCatalog('All')}
+                        style={{ backgroundColor: theme.accentColor }}
+                        className={`px-6 py-3 text-sm font-semibold text-white shadow-lg hover:brightness-110 transition flex items-center gap-2 ${btnRadiusClass}`}
+                      >
+                        <span>{config.hero.ctaText}</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onNavigateCatalog('Audio & Acoustics')}
+                        className={`px-5 py-3 text-sm font-semibold bg-white/15 backdrop-blur-md text-white border border-white/25 hover:bg-white/25 transition ${btnRadiusClass}`}
+                      >
+                        {config.hero.secondaryCtaText}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {activeProducts[0] && (
+                  <div
+                    style={{ borderRadius: theme.borderRadius }}
+                    className={`lg:col-span-4 p-6 flex flex-col justify-between ${cardStyleClass}`}
+                  >
+                    <div>
+                      <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider opacity-60 mb-3">
+                        <span>Flagship Spotlight</span>
+                        <span className="text-emerald-600">● In Stock ({activeProducts[0].stock})</span>
+                      </div>
+                      <div
+                        onClick={() => onOpenProduct(activeProducts[0].id)}
+                        className="aspect-[4/3] rounded-xl overflow-hidden bg-slate-100 dark:bg-neutral-800 cursor-pointer mb-4"
+                      >
+                        <img
+                          src={activeProducts[0].image}
+                          alt={activeProducts[0].name}
+                          className="w-full h-full object-cover hover:scale-105 transition duration-500"
+                        />
+                      </div>
+                      <h3
+                        onClick={() => onOpenProduct(activeProducts[0].id)}
+                        className="font-bold text-lg cursor-pointer hover:underline"
+                      >
+                        {activeProducts[0].name}
+                      </h3>
+                      <p className="text-xs opacity-70 mt-1 line-clamp-2">
+                        {activeProducts[0].description}
+                      </p>
+                    </div>
+
+                    <div className="mt-5 pt-4 border-t border-current/10 flex items-center justify-between gap-3">
+                      <div>
+                        <span className="text-xl font-bold">
+                          {formatINR(activeProducts[0].salePrice || activeProducts[0].price)}
+                        </span>
+                        {activeProducts[0].salePrice && (
+                          <span className="text-xs line-through opacity-50 ml-2">
+                            {formatINR(activeProducts[0].price)}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          addToCart(
+                            activeProducts[0].id,
+                            1,
+                            activeProducts[0].colors[0],
+                            activeProducts[0].sizes[0],
+                            !embeddedPreview
+                          )
+                        }
+                        style={{ backgroundColor: theme.accentColor }}
+                        className={`px-4 py-2.5 text-xs font-bold text-white flex items-center gap-1.5 ${btnRadiusClass}`}
+                      >
+                        <ShoppingBag className="w-3.5 h-3.5" /> Quick Add
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
+                {[
+                  { icon: Truck, title: 'Free Express Shipping', desc: `On all orders above ${formatINR(config.storeSettings.freeShippingThreshold)}` },
+                  { icon: Shield, title: '2-Year Indian Warranty', desc: 'Direct doorstep replacement coverage' },
+                  { icon: RotateCcw, title: '30-Day Easy Returns', desc: 'No-questions-asked pickup from your home' },
+                  { icon: CreditCard, title: 'UPI, Cards & No-Cost EMI', desc: 'Powered by Razorpay, Stripe & Cashfree' },
+                ].map((perk, idx) => {
+                  const Icon = perk.icon;
+                  return (
+                    <div
+                      key={idx}
+                      style={{ borderRadius: theme.borderRadius }}
+                      className={`p-4 flex items-start gap-3 ${cardStyleClass}`}
+                    >
+                      <div className="p-2 rounded-lg bg-blue-600/10 text-blue-600 shrink-0">
+                        <Icon className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-bold">{perk.title}</h4>
+                        <p className="text-[11px] opacity-65 mt-0.5">{perk.desc}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          );
+        }
+
+        if (section.id === 'sec-categories') {
+          return (
+            <section key={section.id} className="max-w-7xl mx-auto px-4 sm:px-6">
+              <div className="flex items-end justify-between mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold tracking-tight">Shop by Category</h2>
+                  <p className="text-sm opacity-65 mt-1">Curated collections engineered for your daily ritual.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onNavigateCatalog('All')}
+                  className="text-sm font-semibold flex items-center gap-1 hover:underline"
+                  style={{ color: theme.accentColor }}
+                >
+                  All Categories <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                {featuredCats.map((cat) => (
+                  <div
+                    key={cat.id}
+                    onClick={() => onNavigateCatalog(cat.name)}
+                    style={{ borderRadius: theme.borderRadius }}
+                    className="group relative h-60 overflow-hidden cursor-pointer bg-slate-900"
+                  >
+                    <img
+                      src={cat.image}
+                      alt={cat.name}
+                      className="w-full h-full object-cover opacity-75 group-hover:scale-105 transition-transform duration-500"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+                    <div className="absolute bottom-4 left-4 right-4 text-white">
+                      <h3 className="font-bold text-lg">{cat.name}</h3>
+                      <p className="text-xs text-slate-300 line-clamp-1 mt-0.5">{cat.description}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          );
+        }
+
+        if (section.id === 'sec-trending') {
+          return (
+            <section key={section.id} className="max-w-7xl mx-auto px-4 sm:px-6">
+              <div className="flex items-end justify-between mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold tracking-tight">Trending Now</h2>
+                  <p className="text-sm opacity-65 mt-1">Most coveted hardware across Bengaluru, Mumbai &amp; Delhi.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onNavigateCatalog('All')}
+                  className="text-sm font-semibold flex items-center gap-1 hover:underline"
+                  style={{ color: theme.accentColor }}
+                >
+                  View Catalog <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                {trendingProducts.map((p) => (
+                  <StorefrontProductCard key={p.id} product={p} embeddedPreview={embeddedPreview} onOpenProduct={onOpenProduct} />
+                ))}
+              </div>
+            </section>
+          );
+        }
+
+        if (section.id === 'sec-promos') {
+          const activeBanners = config.promoBanners.filter((b) => b.active);
+          if (!activeBanners.length) return null;
+          return (
+            <section key={section.id} className="max-w-7xl mx-auto px-4 sm:px-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {activeBanners.map((banner) => (
+                  <div
+                    key={banner.id}
+                    style={{ borderRadius: theme.borderRadius }}
+                    className="relative overflow-hidden min-h-[260px] flex items-end p-7 bg-slate-900 text-white"
+                  >
+                    <img
+                      src={banner.image}
+                      alt={banner.title}
+                      className="absolute inset-0 w-full h-full object-cover opacity-50"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent" />
+                    <div className="relative z-10 max-w-md">
+                      <span className="px-2.5 py-0.5 text-[10px] font-bold tracking-wider uppercase bg-white/20 backdrop-blur-xs rounded-full">
+                        {banner.badge}
+                      </span>
+                      <h3 className="text-2xl font-bold mt-2.5">{banner.title}</h3>
+                      <p className="text-sm text-slate-200 mt-1.5">{banner.subtitle}</p>
+                      <button
+                        type="button"
+                        onClick={() => onNavigateCatalog('All')}
+                        className={`mt-4 px-5 py-2.5 bg-white text-slate-950 text-xs font-bold hover:bg-slate-100 transition ${btnRadiusClass}`}
+                      >
+                        {banner.ctaText}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          );
+        }
+
+        if (section.id === 'sec-bestsellers') {
+          return (
+            <section key={section.id} className="max-w-7xl mx-auto px-4 sm:px-6">
+              <div className="flex items-end justify-between mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold tracking-tight">Best-Selling Essentials</h2>
+                  <p className="text-sm opacity-65 mt-1">Highest rated staples verified by thousands of buyers.</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                {bestSellers.map((p) => (
+                  <StorefrontProductCard key={p.id} product={p} embeddedPreview={embeddedPreview} onOpenProduct={onOpenProduct} />
+                ))}
+              </div>
+            </section>
+          );
+        }
+
+        if (section.id === 'sec-new') {
+          return (
+            <section key={section.id} className="max-w-7xl mx-auto px-4 sm:px-6">
+              <div className="flex items-end justify-between mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold tracking-tight">New Arrivals</h2>
+                  <p className="text-sm opacity-65 mt-1">Freshly unboxed additions to the Aether catalog.</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                {newArrivals.map((p) => (
+                  <StorefrontProductCard key={p.id} product={p} embeddedPreview={embeddedPreview} onOpenProduct={onOpenProduct} />
+                ))}
+              </div>
+            </section>
+          );
+        }
+
+        if (section.id === 'sec-testimonials') {
+          const reviews = [
+            { name: 'Siddharth Kulkarni', city: 'Pune', product: 'Aether Studio ANC Pro', text: 'The noise cancellation on Mumbai-Bengaluru flights is remarkable. Build quality rivals headphones twice the price.' },
+            { name: 'Ananya Menon', city: 'Bengaluru', product: 'Monolith Keychron Q1', text: 'Tactile acoustics right out of the box. Delivered within 24 hours in Indiranagar with immaculate packaging.' },
+            { name: 'Vikramaditya Rao', city: 'Hyderabad', product: 'Krono Series 8 Titanium', text: '12-day battery life and zero bloatware. Finally a smartwatch that looks like a classic horological piece.' },
+          ];
+          return (
+            <section key={section.id} className="max-w-7xl mx-auto px-4 sm:px-6">
+              <h2 className="text-2xl font-bold tracking-tight mb-6">Verified Collector Reviews</h2>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {reviews.map((r, i) => (
+                  <div
+                    key={i}
+                    style={{ borderRadius: theme.borderRadius }}
+                    className={`p-6 ${cardStyleClass}`}
+                  >
+                    <div className="flex items-center gap-1 text-amber-400 mb-3">
+                      {[...Array(5)].map((_, idx) => (
+                        <Star key={idx} className="w-4 h-4 fill-current" />
+                      ))}
+                    </div>
+                    <p className="text-sm leading-relaxed opacity-85">“{r.text}”</p>
+                    <div className="mt-4 pt-4 border-t border-current/10 flex items-center justify-between text-xs">
+                      <span className="font-bold">{r.name} • {r.city}</span>
+                      <span className="opacity-60">{r.product}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          );
+        }
+
+        if (section.id === 'sec-newsletter') {
+          return (
+            <section key={section.id} className="max-w-7xl mx-auto px-4 sm:px-6">
+              <div
+                style={{
+                  borderRadius: theme.borderRadius,
+                  backgroundColor: isDark ? '#171717' : theme.primaryColor,
+                }}
+                className="p-8 sm:p-12 text-white flex flex-col lg:flex-row items-center justify-between gap-8"
+              >
+                <div className="max-w-xl">
+                  <h2 className="text-2xl sm:text-3xl font-bold">Join the Aether Dispatch</h2>
+                  <p className="text-sm text-slate-300 mt-2">
+                    Receive early access to limited-run hardware drops, industrial design notes, and an instant ₹1,000 welcome voucher.
+                  </p>
+                </div>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!newsletterEmail) return;
+                    addToast('Subscribed!', 'Check your inbox for code WELCOME10.');
+                    setNewsletterEmail('');
+                  }}
+                  className="w-full lg:w-auto flex flex-col sm:flex-row gap-3"
+                >
+                  <input
+                    type="email"
+                    required
+                    value={newsletterEmail}
+                    onChange={(e) => setNewsletterEmail(e.target.value)}
+                    placeholder="you@domain.in"
+                    className={`px-4 py-3 bg-white/10 border border-white/20 text-white placeholder:text-slate-400 text-sm min-w-[260px] focus:outline-none ${btnRadiusClass}`}
+                  />
+                  <button
+                    type="submit"
+                    style={{ backgroundColor: theme.accentColor }}
+                    className={`px-6 py-3 text-sm font-semibold text-white hover:brightness-110 transition ${btnRadiusClass}`}
+                  >
+                    Subscribe
+                  </button>
+                </form>
+              </div>
+            </section>
+          );
+        }
+
+        return null;
+      })}
+    </div>
+  );
+};
+
+const StorefrontCatalog = ({ embeddedPreview, onOpenProduct }) => {
+  const { products, categories, catalogFilters, setCatalogFilters, setStoreSubView, config } = useStore();
+  const [viewMode, setViewMode] = useState('grid');
+  const [page, setPage] = useState(1);
+  const pageSize = 12;
+
+  const theme = config.theme;
+  const isDark = theme.storeDarkMode;
+  const btnRadiusClass =
+    theme.buttonStyle === 'pill'
+      ? 'rounded-full'
+      : theme.buttonStyle === 'sharp'
+      ? 'rounded-none'
+      : 'rounded-xl';
+
+  useEffect(() => {
+    setPage(1);
+  }, [catalogFilters.category, catalogFilters.brand, catalogFilters.maxPrice, catalogFilters.search, catalogFilters.sort]);
+
+  const filtered = useMemo(() => {
+    return products
+      .filter((p) => p.status !== 'Draft')
+      .filter((p) => catalogFilters.category === 'All' || p.category === catalogFilters.category)
+      .filter((p) => catalogFilters.brand === 'All' || p.brand === catalogFilters.brand)
+      .filter((p) => (p.salePrice || p.price) <= catalogFilters.maxPrice)
+      .filter(
+        (p) =>
+          !catalogFilters.search ||
+          p.name.toLowerCase().includes(catalogFilters.search.toLowerCase()) ||
+          p.category.toLowerCase().includes(catalogFilters.search.toLowerCase()) ||
+          p.brand.toLowerCase().includes(catalogFilters.search.toLowerCase())
+      )
+      .sort((a, b) => {
+        const pa = a.salePrice || a.price;
+        const pb = b.salePrice || b.price;
+        if (catalogFilters.sort === 'price-asc') return pa - pb;
+        if (catalogFilters.sort === 'price-desc') return pb - pa;
+        if (catalogFilters.sort === 'rating') return b.rating - a.rating;
+        if (catalogFilters.sort === 'popular') return b.salesCount - a.salesCount;
+        return 0;
+      });
+  }, [products, catalogFilters]);
+
+  const visibleProducts = filtered.slice(0, page * pageSize);
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-current/10">
+        <div>
+          <div className="flex items-center gap-2 text-xs opacity-60 mb-1">
+            <button type="button" onClick={() => setStoreSubView('home')} className="hover:underline">Home</button>
+            <span>/</span>
+            <span>{catalogFilters.category}</span>
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-bold">
+            {catalogFilters.category === 'All' ? 'All Products' : catalogFilters.category}
+          </h1>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          {catalogFilters.search && (
+            <button
+              type="button"
+              onClick={() => setCatalogFilters((prev) => ({ ...prev, search: '' }))}
+              className="px-3 py-1.5 rounded-full text-xs font-medium bg-blue-600/10 text-blue-600 flex items-center gap-1.5"
+            >
+              <span>Search: “{catalogFilters.search}”</span>
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+
+          <select
+            value={catalogFilters.sort}
+            onChange={(e) => setCatalogFilters((prev) => ({ ...prev, sort: e.target.value }))}
+            className={`px-3.5 py-2 text-sm border rounded-xl ${
+              isDark ? 'bg-neutral-900 border-neutral-700' : 'bg-white border-slate-200'
+            }`}
+          >
+            <option value="featured">Sort: Featured</option>
+            <option value="popular">Most Popular</option>
+            <option value="rating">Highest Rated</option>
+            <option value="price-asc">Price: Low to High</option>
+            <option value="price-desc">Price: High to Low</option>
+          </select>
+
+          <div className="flex items-center border border-current/15 rounded-xl overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setViewMode('grid')}
+              className={`p-2 ${viewMode === 'grid' ? 'bg-blue-600 text-white' : 'opacity-60'}`}
+              title="Grid View"
+            >
+              <Grid className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('list')}
+              className={`p-2 ${viewMode === 'list' ? 'bg-blue-600 text-white' : 'opacity-60'}`}
+              title="List View"
+            >
+              <List className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 mt-8">
+        <aside className="space-y-6">
+          <div>
+            <h3 className="text-xs font-bold uppercase tracking-wider opacity-60 mb-3">Categories</h3>
+            <div className="space-y-1.5">
+              {['All', ...categories.map((c) => c.name)].map((catName) => (
+                <button
+                  type="button"
+                  key={catName}
+                  onClick={() => setCatalogFilters((prev) => ({ ...prev, category: catName }))}
+                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition flex items-center justify-between ${
+                    catalogFilters.category === catName
+                      ? 'font-semibold text-white'
+                      : 'opacity-75 hover:opacity-100'
+                  }`}
+                  style={
+                    catalogFilters.category === catName
+                      ? { backgroundColor: theme.accentColor }
+                      : undefined
+                  }
+                >
+                  <span>{catName}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-xs font-bold uppercase tracking-wider opacity-60 mb-3">Brand</h3>
+            <select
+              value={catalogFilters.brand}
+              onChange={(e) => setCatalogFilters((prev) => ({ ...prev, brand: e.target.value }))}
+              className={`w-full px-3 py-2 text-sm border rounded-xl ${
+                isDark ? 'bg-neutral-900 border-neutral-700' : 'bg-white border-slate-200'
+              }`}
+            >
+              <option value="All">All Brands</option>
+              {BRANDS.map((b) => (
+                <option key={b} value={b}>{b}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider opacity-60 mb-2">
+              <span>Max Price</span>
+              <span>{formatINR(catalogFilters.maxPrice)}</span>
+            </div>
+            <input
+              type="range"
+              min={2000}
+              max={50000}
+              step={1000}
+              value={catalogFilters.maxPrice}
+              onChange={(e) => setCatalogFilters((prev) => ({ ...prev, maxPrice: Number(e.target.value) }))}
+              className="w-full accent-blue-600"
+            />
+            <div className="flex justify-between text-[11px] opacity-50 mt-1">
+              <span>₹2,000</span>
+              <span>₹50,000</span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() =>
+              setCatalogFilters({ category: 'All', brand: 'All', maxPrice: 50000, search: '', sort: 'featured' })
+            }
+            className="w-full py-2.5 text-xs font-semibold border border-current/20 rounded-xl hover:bg-current/5"
+          >
+            Reset All Filters
+          </button>
+        </aside>
+
+        <div className="lg:col-span-3">
+          <p className="text-xs opacity-60 mb-4">
+            Showing {visibleProducts.length} of {filtered.length} products
+          </p>
+
+          {visibleProducts.length === 0 ? (
+            <div className="p-12 text-center border border-dashed border-current/20 rounded-2xl">
+              <Package className="w-10 h-10 mx-auto opacity-40 mb-3" />
+              <h3 className="font-semibold text-lg">No matching products</h3>
+              <p className="text-sm opacity-65 mt-1">Try broadening your price ceiling or clearing search keywords.</p>
+            </div>
+          ) : (
+            <>
+              <div
+                className={
+                  viewMode === 'grid'
+                    ? 'grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6'
+                    : 'flex flex-col gap-4'
+                }
+              >
+                {visibleProducts.map((p) => (
+                  <StorefrontProductCard
+                    key={p.id}
+                    product={p}
+                    listView={viewMode === 'list'}
+                    embeddedPreview={embeddedPreview}
+                    onOpenProduct={onOpenProduct}
+                  />
+                ))}
+              </div>
+
+              {visibleProducts.length < filtered.length && (
+                <div className="mt-10 text-center">
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => p + 1)}
+                    style={{ backgroundColor: theme.accentColor }}
+                    className={`px-7 py-3 text-sm font-semibold text-white ${btnRadiusClass}`}
+                  >
+                    Load More Products ({filtered.length - visibleProducts.length} remaining)
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const StorefrontProductDetail = ({ embeddedPreview, onOpenProduct }) => {
+  const { products, selectedProductId, setStoreSubView, recentlyViewedIds, addToCart, config } = useStore();
+  const product = products.find((p) => p.id === selectedProductId) || products[0];
+
+  const [activeImg, setActiveImg] = useState(product.image);
+  const [selectedColor, setSelectedColor] = useState(product.colors[0]);
+  const [selectedSize, setSelectedSize] = useState(product.sizes[0]);
+  const [qty, setQty] = useState(1);
+
+  const theme = config.theme;
+  const isDark = theme.storeDarkMode;
+  const btnRadiusClass =
+    theme.buttonStyle === 'pill'
+      ? 'rounded-full'
+      : theme.buttonStyle === 'sharp'
+      ? 'rounded-none'
+      : 'rounded-xl';
+  const cardStyleClass =
+    theme.cardStyle === 'bordered'
+      ? isDark
+        ? 'bg-neutral-900 border border-neutral-800'
+        : 'bg-white border border-slate-200'
+      : theme.cardStyle === 'minimal'
+      ? 'bg-transparent'
+      : isDark
+      ? 'bg-neutral-900/90 border border-neutral-800/80 shadow-lg'
+      : 'bg-white border border-slate-100 shadow-sm hover:shadow-md';
+
+  useEffect(() => {
+    setActiveImg(product.image);
+    setSelectedColor(product.colors[0]);
+    setSelectedSize(product.sizes[0]);
+    setQty(1);
+  }, [product]);
+
+  const related = products
+    .filter((p) => p.category === product.category && p.id !== product.id)
+    .slice(0, 4);
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+      <button
+        type="button"
+        onClick={() => setStoreSubView('catalog')}
+        className="inline-flex items-center gap-1.5 text-sm opacity-70 hover:opacity-100 mb-6"
+      >
+        <ChevronLeft className="w-4 h-4" /> Back to Catalog
+      </button>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+        <div className="space-y-4">
+          <div
+            style={{ borderRadius: theme.borderRadius }}
+            className="aspect-square overflow-hidden bg-slate-100 dark:bg-neutral-800"
+          >
+            <img src={activeImg} alt={product.name} className="w-full h-full object-cover" />
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            {product.gallery.map((img, i) => (
+              <button
+                type="button"
+                key={i}
+                onClick={() => setActiveImg(img)}
+                style={{ borderRadius: theme.borderRadius }}
+                className={`aspect-square overflow-hidden border-2 transition ${
+                  activeImg === img ? 'border-blue-600' : 'border-transparent opacity-65 hover:opacity-100'
+                }`}
+              >
+                <img src={img} alt="" className="w-full h-full object-cover" />
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-6">
+          <div>
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider opacity-60">
+              <span>{product.brand}</span>
+              <span>•</span>
+              <span>SKU: {product.sku}</span>
+            </div>
+            <h1 className="text-2xl sm:text-4xl font-bold mt-2">{product.name}</h1>
+
+            <div className="flex items-center gap-4 mt-3">
+              <div className="flex items-center gap-1 text-amber-400 text-sm font-semibold">
+                <Star className="w-4 h-4 fill-current" />
+                <span>{product.rating}</span>
+                <span className="opacity-60 font-normal">({product.reviewCount} reviews)</span>
+              </div>
+              <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 font-medium">
+                {product.stock > 0 ? `In Stock (${product.stock} available)` : 'Out of Stock'}
+              </span>
+            </div>
+          </div>
+
+          <div className="py-4 border-y border-current/10">
+            {product.salePrice ? (
+              <div className="flex items-baseline gap-3">
+                <span className="text-3xl font-bold">{formatINR(product.salePrice)}</span>
+                <span className="text-lg line-through opacity-50">{formatINR(product.price)}</span>
+                <span className="text-xs font-bold px-2 py-0.5 bg-emerald-600 text-white rounded-md">
+                  Save {formatINR(product.price - product.salePrice)}
+                </span>
+              </div>
+            ) : (
+              <span className="text-3xl font-bold">{formatINR(product.price)}</span>
+            )}
+            <p className="text-xs opacity-60 mt-1">Inclusive of 18% GST • Free Express Delivery</p>
+          </div>
+
+          <p className="text-sm leading-relaxed opacity-80">{product.description}</p>
+
+          <div className="space-y-4">
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider opacity-70 block mb-2">
+                Finish: {selectedColor}
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {product.colors.map((c) => (
+                  <button
+                    type="button"
+                    key={c}
+                    onClick={() => setSelectedColor(c)}
+                    className={`px-4 py-2 text-xs font-medium border transition ${btnRadiusClass} ${
+                      selectedColor === c
+                        ? 'border-blue-600 bg-blue-600/10 font-bold'
+                        : 'border-current/20 opacity-75'
+                    }`}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold uppercase tracking-wider opacity-70 block mb-2">
+                Configuration / Size: {selectedSize}
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {product.sizes.map((s) => (
+                  <button
+                    type="button"
+                    key={s}
+                    onClick={() => setSelectedSize(s)}
+                    className={`px-4 py-2 text-xs font-medium border transition ${btnRadiusClass} ${
+                      selectedSize === s
+                        ? 'border-blue-600 bg-blue-600/10 font-bold'
+                        : 'border-current/20 opacity-75'
+                    }`}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-4 pt-2">
+            <div className={`flex items-center border border-current/20 ${btnRadiusClass}`}>
+              <button
+                type="button"
+                onClick={() => setQty((q) => Math.max(1, q - 1))}
+                className="p-3 hover:bg-current/5"
+              >
+                <Minus className="w-4 h-4" />
+              </button>
+              <span className="px-4 font-semibold text-sm">{qty}</span>
+              <button
+                type="button"
+                onClick={() => setQty((q) => Math.min(product.stock || 10, q + 1))}
+                className="p-3 hover:bg-current/5"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
+
+            <button
+              type="button"
+              disabled={product.stock === 0}
+              onClick={() => addToCart(product.id, qty, selectedColor, selectedSize, true)}
+              style={{ backgroundColor: theme.accentColor }}
+              className={`flex-1 py-3.5 px-6 text-sm font-semibold text-white hover:brightness-110 transition disabled:opacity-50 ${btnRadiusClass}`}
+            >
+              Add to Shopping Bag
+            </button>
+
+            <button
+              type="button"
+              disabled={product.stock === 0}
+              onClick={() => {
+                addToCart(product.id, qty, selectedColor, selectedSize, false);
+                setStoreSubView('checkout');
+              }}
+              className={`py-3.5 px-6 text-sm font-semibold border border-current/25 hover:bg-current/5 transition disabled:opacity-50 ${btnRadiusClass}`}
+            >
+              Buy Now
+            </button>
+          </div>
+
+          <div className="pt-6 border-t border-current/10">
+            <h3 className="text-sm font-bold uppercase tracking-wider mb-3">Technical Specifications</h3>
+            <dl className="divide-y divide-current/10 text-sm">
+              {product.specs.map((sp, i) => (
+                <div key={i} className="py-2.5 flex justify-between gap-4">
+                  <dt className="opacity-60">{sp.label}</dt>
+                  <dd className="font-medium text-right">{sp.value}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-14 pt-10 border-t border-current/10">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+          <div>
+            <h2 className="text-xl font-bold">Verified Customer Reviews ({product.reviewCount})</h2>
+            <p className="text-xs opacity-65 mt-0.5">Rated {product.rating} out of 5 based on verified Indian orders</p>
+          </div>
+          <div className="flex items-center gap-1.5 text-amber-400">
+            {[...Array(5)].map((_, idx) => (
+              <Star key={idx} className="w-4 h-4 fill-current" />
+            ))}
+            <span className="text-sm font-bold ml-1 text-current">{product.rating}/5</span>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {[
+            { author: 'Arjun Malhotra', city: 'Mumbai', date: '5 days ago', title: 'Exceptional finish and daily comfort', body: `Using the ${product.name} at my studio every day. Packaging, tactile controls, and battery endurance exceed expectations.` },
+            { author: 'Meera Krishnan', city: 'Bengaluru', date: '2 weeks ago', title: 'Worth every rupee', body: 'Fast delivery and genuine 2-year warranty registration. Easily the cleanest industrial design in its category.' },
+          ].map((rev, idx) => (
+            <div key={idx} style={{ borderRadius: theme.borderRadius }} className={`p-5 ${cardStyleClass}`}>
+              <div className="flex items-center justify-between text-xs opacity-60 mb-2">
+                <span className="font-semibold text-current opacity-100">{rev.author} • {rev.city}</span>
+                <span>{rev.date}</span>
+              </div>
+              <div className="flex items-center gap-0.5 text-amber-400 mb-2">
+                {[...Array(5)].map((_, sIdx) => (
+                  <Star key={sIdx} className="w-3.5 h-3.5 fill-current" />
+                ))}
+              </div>
+              <h4 className="font-bold text-sm">{rev.title}</h4>
+              <p className="text-xs opacity-75 mt-1 leading-relaxed">{rev.body}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {related.length > 0 && (
+        <div className="mt-16 pt-12 border-t border-current/10">
+          <h2 className="text-2xl font-bold mb-6">Complete Your Setup</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {related.map((p) => (
+              <StorefrontProductCard key={p.id} product={p} embeddedPreview={embeddedPreview} onOpenProduct={onOpenProduct} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {recentlyViewedIds.filter((id) => id !== product.id).length > 0 && (
+        <div className="mt-14 pt-10 border-t border-current/10">
+          <h2 className="text-xl font-bold mb-6">Recently Viewed</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {recentlyViewedIds
+              .filter((id) => id !== product.id)
+              .map((id) => products.find((p) => p.id === id))
+              .filter(Boolean)
+              .map((p) => (
+                <StorefrontProductCard key={p.id} product={p} embeddedPreview={embeddedPreview} onOpenProduct={onOpenProduct} />
+              ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const StorefrontCheckout = () => {
+  const { config, cart, products, appliedCoupon, placeSimulatedOrder } = useStore();
+  const enabledGateways = config.gateways.filter((g) => g.enabled);
+
+  const [selectedGateway, setSelectedGateway] = useState(enabledGateways[0]?.name || 'Razorpay');
+  const [shippingMethod, setShippingMethod] = useState('standard');
+  const [customerDetails, setCustomerDetails] = useState({
+    fullName: 'Rohan Deshmukh',
+    email: 'rohan.deshmukh@example.in',
+    phone: '+91 98201 44510',
+    address: '402, Skylark Towers, Koregaon Park',
+    city: 'Pune',
+    state: 'Maharashtra',
+    pincode: '411001',
+  });
+
+  const theme = config.theme;
+  const isDark = theme.storeDarkMode;
+  const btnRadiusClass =
+    theme.buttonStyle === 'pill'
+      ? 'rounded-full'
+      : theme.buttonStyle === 'sharp'
+      ? 'rounded-none'
+      : 'rounded-xl';
+  const cardStyleClass =
+    theme.cardStyle === 'bordered'
+      ? isDark
+        ? 'bg-neutral-900 border border-neutral-800'
+        : 'bg-white border border-slate-200'
+      : theme.cardStyle === 'minimal'
+      ? 'bg-transparent'
+      : isDark
+      ? 'bg-neutral-900/90 border border-neutral-800/80 shadow-lg'
+      : 'bg-white border border-slate-100 shadow-sm hover:shadow-md';
+
+  const cartItems = cart
+    .map((item) => {
+      const prod = products.find((p) => p.id === item.productId);
+      return prod ? { ...item, product: prod } : null;
+    })
+    .filter(Boolean);
+
+  const subtotal = cartItems.reduce(
+    (sum, item) => sum + (item.product.salePrice || item.product.price) * item.quantity,
+    0
+  );
+  const discountAmt = appliedCoupon
+    ? appliedCoupon.type === 'Percentage'
+      ? Math.round((subtotal * appliedCoupon.value) / 100)
+      : appliedCoupon.value
+    : 0;
+  const shippingCost =
+    shippingMethod === 'express'
+      ? 299
+      : subtotal >= config.storeSettings.freeShippingThreshold
+      ? 0
+      : 149;
+  const total = Math.max(0, subtotal - discountAmt + shippingCost);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (cartItems.length === 0) return;
+    placeSimulatedOrder({
+      customerDetails,
+      shippingMethod,
+      paymentGateway: selectedGateway,
+    });
   };
 
-  const navigateCatalog = (category = 'All') => {
+  return (
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10">
+      <div className="mb-6 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center gap-3 text-xs text-amber-700 dark:text-amber-300">
+        <Lock className="w-4 h-4 shrink-0" />
+        <span>
+          <strong>Demo Mode Checkout:</strong> No real payment is processed or authorized. Submitting places a simulated order directly into the Admin Dashboard.
+        </span>
+      </div>
+
+      <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <div className="lg:col-span-7 space-y-6">
+          <div style={{ borderRadius: theme.borderRadius }} className={`p-6 ${cardStyleClass}`}>
+            <h2 className="text-lg font-bold mb-4">1. Shipping Information</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-medium opacity-70 mb-1">Full Name</label>
+                <input
+                  required
+                  value={customerDetails.fullName}
+                  onChange={(e) => setCustomerDetails({ ...customerDetails, fullName: e.target.value })}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-current/20 bg-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium opacity-70 mb-1">Email Address</label>
+                <input
+                  type="email"
+                  required
+                  value={customerDetails.email}
+                  onChange={(e) => setCustomerDetails({ ...customerDetails, email: e.target.value })}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-current/20 bg-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium opacity-70 mb-1">Mobile Number</label>
+                <input
+                  required
+                  value={customerDetails.phone}
+                  onChange={(e) => setCustomerDetails({ ...customerDetails, phone: e.target.value })}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-current/20 bg-transparent"
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-medium opacity-70 mb-1">Street Address</label>
+                <input
+                  required
+                  value={customerDetails.address}
+                  onChange={(e) => setCustomerDetails({ ...customerDetails, address: e.target.value })}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-current/20 bg-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium opacity-70 mb-1">City</label>
+                <input
+                  required
+                  value={customerDetails.city}
+                  onChange={(e) => setCustomerDetails({ ...customerDetails, city: e.target.value })}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-current/20 bg-transparent"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium opacity-70 mb-1">State</label>
+                  <input
+                    required
+                    value={customerDetails.state}
+                    onChange={(e) => setCustomerDetails({ ...customerDetails, state: e.target.value })}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-current/20 bg-transparent"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium opacity-70 mb-1">PIN Code</label>
+                  <input
+                    required
+                    value={customerDetails.pincode}
+                    onChange={(e) => setCustomerDetails({ ...customerDetails, pincode: e.target.value })}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-current/20 bg-transparent"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ borderRadius: theme.borderRadius }} className={`p-6 ${cardStyleClass}`}>
+            <h2 className="text-lg font-bold mb-4">2. Delivery Speed</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+              <button
+                type="button"
+                onClick={() => setShippingMethod('standard')}
+                className={`p-4 rounded-xl border text-left transition ${
+                  shippingMethod === 'standard' ? 'border-blue-600 bg-blue-600/10' : 'border-current/20'
+                }`}
+              >
+                <div className="flex justify-between font-bold">
+                  <span>Standard Courier</span>
+                  <span>{subtotal >= config.storeSettings.freeShippingThreshold ? 'FREE' : formatINR(149)}</span>
+                </div>
+                <p className="text-xs opacity-65 mt-1">3–5 Business Days via BlueDart</p>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShippingMethod('express')}
+                className={`p-4 rounded-xl border text-left transition ${
+                  shippingMethod === 'express' ? 'border-blue-600 bg-blue-600/10' : 'border-current/20'
+                }`}
+              >
+                <div className="flex justify-between font-bold">
+                  <span>Priority Air Express</span>
+                  <span>{formatINR(299)}</span>
+                </div>
+                <p className="text-xs opacity-65 mt-1">1–2 Business Days insured delivery</p>
+              </button>
+            </div>
+          </div>
+
+          <div style={{ borderRadius: theme.borderRadius }} className={`p-6 ${cardStyleClass}`}>
+            <h2 className="text-lg font-bold mb-1">3. Simulated Payment Method</h2>
+            <p className="text-xs opacity-65 mb-4">
+              Active gateways are controlled live from Admin → Integrations → Payment Gateways.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {config.gateways.map((gw) => (
+                <button
+                  key={gw.id}
+                  type="button"
+                  disabled={!gw.enabled}
+                  onClick={() => setSelectedGateway(gw.name)}
+                  className={`p-4 rounded-xl border text-left transition ${
+                    !gw.enabled
+                      ? 'opacity-40 cursor-not-allowed border-current/15'
+                      : selectedGateway === gw.name
+                      ? 'border-blue-600 bg-blue-600/10'
+                      : 'border-current/20 hover:border-current/40'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-sm">{gw.name}</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-current/10">
+                      {gw.enabled ? `${gw.mode} Mode` : 'Disabled'}
+                    </span>
+                  </div>
+                  <p className="text-xs opacity-65 mt-1">{gw.tagline}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="lg:col-span-5">
+          <div style={{ borderRadius: theme.borderRadius }} className={`p-6 sticky top-24 ${cardStyleClass}`}>
+            <h2 className="text-lg font-bold mb-4">Order Summary ({cartItems.length})</h2>
+            <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
+              {cartItems.map((item, idx) => (
+                <div key={idx} className="flex items-center gap-3 text-sm">
+                  <img src={item.product.image} alt="" className="w-12 h-12 rounded-lg object-cover" />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium truncate">{item.product.name}</p>
+                    <p className="text-xs opacity-60">Qty {item.quantity} • {item.color}</p>
+                  </div>
+                  <span className="font-semibold">
+                    {formatINR((item.product.salePrice || item.product.price) * item.quantity)}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-5 pt-4 border-t border-current/10 space-y-2 text-sm">
+              <div className="flex justify-between opacity-75">
+                <span>Subtotal</span>
+                <span>{formatINR(subtotal)}</span>
+              </div>
+              {discountAmt > 0 && (
+                <div className="flex justify-between text-emerald-600 font-medium">
+                  <span>Discount ({appliedCoupon?.code})</span>
+                  <span>-{formatINR(discountAmt)}</span>
+                </div>
+              )}
+              <div className="flex justify-between opacity-75">
+                <span>Shipping</span>
+                <span>{shippingCost === 0 ? 'FREE' : formatINR(shippingCost)}</span>
+              </div>
+              <div className="flex justify-between text-base font-bold pt-2 border-t border-current/10">
+                <span>Total Payable (incl. GST)</span>
+                <span>{formatINR(total)}</span>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={cartItems.length === 0}
+              style={{ backgroundColor: theme.accentColor }}
+              className={`w-full mt-6 py-4 text-sm font-bold text-white shadow-lg hover:brightness-110 transition ${btnRadiusClass}`}
+            >
+              Simulate Payment via {selectedGateway} • {formatINR(total)}
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  );
+};
+
+const StorefrontConfirmation = () => {
+  const { lastPlacedOrder, orders, setStoreSubView, setOrderLookupOpen, config } = useStore();
+  const order = lastPlacedOrder || orders[0];
+  const theme = config.theme;
+  const isDark = theme.storeDarkMode;
+  const btnRadiusClass =
+    theme.buttonStyle === 'pill'
+      ? 'rounded-full'
+      : theme.buttonStyle === 'sharp'
+      ? 'rounded-none'
+      : 'rounded-xl';
+  const cardStyleClass =
+    theme.cardStyle === 'bordered'
+      ? isDark
+        ? 'bg-neutral-900 border border-neutral-800'
+        : 'bg-white border border-slate-200'
+      : theme.cardStyle === 'minimal'
+      ? 'bg-transparent'
+      : isDark
+      ? 'bg-neutral-900/90 border border-neutral-800/80 shadow-lg'
+      : 'bg-white border border-slate-100 shadow-sm hover:shadow-md';
+
+  return (
+    <div className="max-w-2xl mx-auto px-4 py-16 text-center">
+      <div className="w-16 h-16 rounded-full bg-emerald-500/15 text-emerald-500 flex items-center justify-center mx-auto mb-5">
+        <CheckCircle2 className="w-9 h-9" />
+      </div>
+      <span className="text-xs font-bold uppercase tracking-widest text-emerald-600">
+        Simulated Order Confirmed
+      </span>
+      <h1 className="text-3xl font-bold mt-2">Thank you, {order?.customerName}!</h1>
+      <p className="text-sm opacity-70 mt-2">
+        Your simulated order <strong>{order?.orderNumber}</strong> has been created and synced with the Admin Dashboard &amp; Inventory ledger.
+      </p>
+
+      <div style={{ borderRadius: theme.borderRadius }} className={`mt-8 p-6 text-left ${cardStyleClass}`}>
+        <div className="grid grid-cols-2 gap-4 text-sm pb-4 border-b border-current/10">
+          <div>
+            <span className="text-xs opacity-60 block">Order Reference</span>
+            <span className="font-bold">{order?.orderNumber}</span>
+          </div>
+          <div>
+            <span className="text-xs opacity-60 block">Payment Gateway</span>
+            <span className="font-bold">{order?.paymentMethod} (Simulated)</span>
+          </div>
+          <div>
+            <span className="text-xs opacity-60 block">Delivery Destination</span>
+            <span className="font-medium text-xs">{order?.shippingAddress}</span>
+          </div>
+          <div>
+            <span className="text-xs opacity-60 block">Total Paid</span>
+            <span className="font-bold text-base">{formatINR(order?.total || 0)}</span>
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-col sm:flex-row gap-3">
+          <button
+            type="button"
+            onClick={() => setStoreSubView('home')}
+            style={{ backgroundColor: theme.accentColor }}
+            className={`flex-1 py-3 text-sm font-semibold text-white ${btnRadiusClass}`}
+          >
+            Continue Shopping
+          </button>
+          <button
+            type="button"
+            onClick={() => setOrderLookupOpen(true)}
+            className={`flex-1 py-3 text-sm font-semibold border border-current/25 hover:bg-current/5 ${btnRadiusClass}`}
+          >
+            Track Order Status
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const StorefrontExperience = ({ embeddedPreview = false }) => {
+  const {
+    storeSubView,
+    setStoreSubView,
+    setSelectedProductId,
+    recordRecentlyViewed,
+    quickViewProductId,
+    setQuickViewProductId,
+    wishlist,
+    toggleWishlist,
+    orderLookupOpen,
+    setOrderLookupOpen,
+    activeInfoModal,
+    setActiveInfoModal,
+    setCatalogFilters,
+    products,
+    categories,
+    orders,
+    config,
+    cart,
+    addToCart,
+    cartOpen,
+    setCartOpen,
+  } = useStore();
+
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [searchInput, setSearchInput] = useState('');
+  const [wishlistDrawerOpen, setWishlistDrawerOpen] = useState(false);
+  const [trackOrderInput, setTrackOrderInput] = useState('');
+
+  const theme = config.theme;
+  const isDark = theme.storeDarkMode;
+  const cartCount = cart.reduce((acc, item) => acc + item.quantity, 0);
+
+  const openProductDetail = useCallback((productId) => {
+    setSelectedProductId(productId);
+    recordRecentlyViewed(productId);
+    setStoreSubView('product');
+    if (!embeddedPreview) window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [setSelectedProductId, recordRecentlyViewed, setStoreSubView, embeddedPreview]);
+
+  const navigateCatalog = useCallback((category = 'All') => {
     setCatalogFilters((prev) => ({ ...prev, category }));
     setStoreSubView('catalog');
     setMobileMenuOpen(false);
     if (!embeddedPreview) window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
+  }, [setCatalogFilters, setStoreSubView, embeddedPreview]);
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();
     setCatalogFilters((prev) => ({ ...prev, search: searchInput }));
     setStoreSubView('catalog');
-  };
-
-  // Product Card Sub-component
-  const ProductCard = ({ product, listView = false }) => {
-    const discountPct = product.salePrice
-      ? Math.round(((product.price - product.salePrice) / product.price) * 100)
-      : 0;
-    const isSaved = wishlist.includes(product.id);
-
-    return (
-      <div
-        style={{ borderRadius: theme.borderRadius }}
-        className={`group overflow-hidden transition-all duration-200 flex ${
-          listView ? 'flex-col sm:flex-row gap-5 p-4' : 'flex-col'
-        } ${cardStyleClass}`}
-      >
-        <div
-          className={`relative overflow-hidden bg-slate-100 dark:bg-neutral-800 ${
-            listView ? 'w-full sm:w-56 h-52 shrink-0 rounded-lg' : 'aspect-square w-full'
-          }`}
-        >
-          <img
-            onClick={() => openProductDetail(product.id)}
-            src={product.image}
-            alt={product.name}
-            className="w-full h-full object-cover cursor-pointer group-hover:scale-105 transition-transform duration-500"
-          />
-          <div className="absolute top-3 left-3 flex flex-col gap-1.5 pointer-events-none">
-            {product.badge && (
-              <span
-                style={{ backgroundColor: theme.accentColor }}
-                className="px-2.5 py-0.5 text-[11px] font-semibold text-white rounded-full shadow-xs"
-              >
-                {product.badge}
-              </span>
-            )}
-            {discountPct > 0 && (
-              <span className="px-2 py-0.5 text-[11px] font-semibold bg-emerald-600 text-white rounded-full">
-                -{discountPct}%
-              </span>
-            )}
-          </div>
-
-          {/* Quick Action Buttons (Wishlist & Quick View) */}
-          {!embeddedPreview && (
-            <div className="absolute top-3 right-3 flex flex-col gap-1.5">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleWishlist(product.id);
-                }}
-                className="w-8 h-8 rounded-full bg-white/90 text-slate-900 shadow-sm flex items-center justify-center hover:scale-105 transition"
-                title={isSaved ? 'Remove from Wishlist' : 'Save to Wishlist'}
-              >
-                <Heart className={`w-4 h-4 ${isSaved ? 'fill-rose-500 text-rose-500' : ''}`} />
-              </button>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setQuickViewProductId(product.id);
-                }}
-                className="w-8 h-8 rounded-full bg-white/90 text-slate-900 shadow-sm flex items-center justify-center opacity-0 group-hover:opacity-100 hover:scale-105 transition"
-                title="Quick View"
-              >
-                <Eye className="w-4 h-4" />
-              </button>
-            </div>
-          )}
-
-          {product.stock <= 5 && product.stock > 0 && (
-            <span className="absolute bottom-2.5 left-2.5 px-2 py-0.5 text-[10px] font-medium bg-amber-500 text-white rounded-md">
-              Only {product.stock} left
-            </span>
-          )}
-          {product.stock === 0 && (
-            <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-              <span className="px-3 py-1 bg-white text-slate-900 text-xs font-bold rounded-full">
-                Out of Stock
-              </span>
-            </div>
-          )}
-        </div>
-
-        <div className={`flex flex-col justify-between flex-1 ${listView ? 'py-1' : theme.density === 'compact' ? 'p-3.5' : 'p-4'}`}>
-          <div>
-            <div className="flex items-center justify-between text-xs opacity-60 mb-1">
-              <span>{product.category} • {product.brand}</span>
-              <span className="flex items-center gap-1">
-                <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-                {product.rating} ({product.reviewCount})
-              </span>
-            </div>
-            <h3
-              onClick={() => openProductDetail(product.id)}
-              className="font-semibold text-base leading-snug cursor-pointer hover:underline line-clamp-2"
-            >
-              {product.name}
-            </h3>
-            <div className="flex items-center gap-1.5 mt-2">
-              {product.colors.map((col, idx) => (
-                <span
-                  key={idx}
-                  title={col}
-                  className="text-[10px] px-2 py-0.5 rounded bg-current/5 opacity-75"
-                >
-                  {col}
-                </span>
-              ))}
-            </div>
-            {listView && (
-              <p className="text-sm opacity-75 mt-2 line-clamp-2">{product.description}</p>
-            )}
-          </div>
-
-          <div className="mt-4 pt-3 border-t border-current/10 flex items-center justify-between gap-2">
-            <div>
-              {product.salePrice ? (
-                <div className="flex items-baseline gap-2">
-                  <span className="font-bold text-base">{formatINR(product.salePrice)}</span>
-                  <span className="text-xs line-through opacity-50">{formatINR(product.price)}</span>
-                </div>
-              ) : (
-                <span className="font-bold text-base">{formatINR(product.price)}</span>
-              )}
-              <span className="text-[10px] opacity-55 block">Free Express Delivery</span>
-            </div>
-
-            <button
-              disabled={product.stock === 0}
-              onClick={() => addToCart(product.id, 1, product.colors[0], product.sizes[0], !embeddedPreview)}
-              style={{
-                backgroundColor: product.stock === 0 ? '#94a3b8' : theme.accentColor,
-              }}
-              className={`px-3.5 py-2 text-xs font-semibold text-white transition opacity-95 hover:opacity-100 disabled:cursor-not-allowed flex items-center gap-1.5 ${btnRadiusClass}`}
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Add</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  // --- Storefront Sub-View: Homepage ---
-  const renderHomepage = () => {
-    const activeProducts = products.filter((p) => p.status !== 'Draft');
-    const trendingProducts = activeProducts.filter((p) => p.badge === 'Trending' || p.rating >= 4.7).slice(0, 4);
-    const bestSellers = [...activeProducts].sort((a, b) => b.salesCount - a.salesCount).slice(0, 4);
-    const newArrivals = activeProducts.slice(-4);
-    const featuredCats = categories.filter((c) => c.featured);
-
-    return (
-      <div className="space-y-14 pb-16">
-        {/* Interactive Category Quick-Filter Ribbon directly under Header */}
-        <div className="border-b border-current/10 py-3 px-4 sm:px-6 overflow-x-auto">
-          <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                onClick={() => navigateCatalog('All')}
-                style={{ backgroundColor: theme.accentColor }}
-                className="px-3.5 py-1.5 rounded-full text-xs font-semibold text-white"
-              >
-                All {activeProducts.length} Products
-              </button>
-              {categories.map((cat) => (
-                <button
-                  key={cat.id}
-                  onClick={() => navigateCatalog(cat.name)}
-                  className="px-3.5 py-1.5 rounded-full text-xs font-medium border border-current/15 hover:border-current/40 transition shrink-0"
-                >
-                  {cat.name}
-                </button>
-              ))}
-            </div>
-            <div className="hidden xl:flex items-center gap-4 text-xs opacity-70 shrink-0">
-              <span className="flex items-center gap-1"><Truck className="w-3.5 h-3.5" /> 24–48h Metro Dispatch</span>
-              <span className="flex items-center gap-1"><Shield className="w-3.5 h-3.5" /> GST Invoice Ready</span>
-            </div>
-          </div>
-        </div>
-
-        {config.sections.map((section) => {
-          if (!section.visible) return null;
-
-          if (section.id === 'sec-hero') {
-            return (
-              <section key={section.id} className="max-w-7xl mx-auto px-4 sm:px-6">
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                  {/* Main Hero Banner */}
-                  <div
-                    style={{ borderRadius: theme.borderRadius }}
-                    className="lg:col-span-8 relative overflow-hidden min-h-[420px] sm:min-h-[480px] flex items-center bg-slate-900 text-white"
-                  >
-                    <img
-                      src={config.hero.image}
-                      alt="Hero showcase"
-                      className="absolute inset-0 w-full h-full object-cover opacity-55"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/50 to-transparent" />
-                    <div className="relative z-10 max-w-xl px-6 sm:px-10 py-10">
-                      <span
-                        style={{ backgroundColor: theme.accentColor }}
-                        className="inline-block px-3 py-1 text-[11px] font-bold tracking-widest uppercase rounded-full mb-4"
-                      >
-                        {config.hero.eyebrow}
-                      </span>
-                      <h1 className="text-3xl sm:text-5xl font-bold tracking-tight leading-[1.08]">
-                        {config.hero.title}
-                      </h1>
-                      <p className="mt-4 text-sm sm:text-base text-slate-200 leading-relaxed">
-                        {config.hero.subtitle}
-                      </p>
-                      <div className="mt-7 flex flex-wrap items-center gap-3">
-                        <button
-                          onClick={() => navigateCatalog('All')}
-                          style={{ backgroundColor: theme.accentColor }}
-                          className={`px-6 py-3 text-sm font-semibold text-white shadow-lg hover:brightness-110 transition flex items-center gap-2 ${btnRadiusClass}`}
-                        >
-                          <span>{config.hero.ctaText}</span>
-                          <ArrowRight className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => navigateCatalog('Audio & Acoustics')}
-                          className={`px-5 py-3 text-sm font-semibold bg-white/15 backdrop-blur-md text-white border border-white/25 hover:bg-white/25 transition ${btnRadiusClass}`}
-                        >
-                          {config.hero.secondaryCtaText}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Interactive Spotlight Product Card beside Hero */}
-                  {activeProducts[0] && (
-                    <div
-                      style={{ borderRadius: theme.borderRadius }}
-                      className={`lg:col-span-4 p-6 flex flex-col justify-between ${cardStyleClass}`}
-                    >
-                      <div>
-                        <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider opacity-60 mb-3">
-                          <span>Flagship Spotlight</span>
-                          <span className="text-emerald-600">● In Stock ({activeProducts[0].stock})</span>
-                        </div>
-                        <div
-                          onClick={() => openProductDetail(activeProducts[0].id)}
-                          className="aspect-[4/3] rounded-xl overflow-hidden bg-slate-100 dark:bg-neutral-800 cursor-pointer mb-4"
-                        >
-                          <img
-                            src={activeProducts[0].image}
-                            alt={activeProducts[0].name}
-                            className="w-full h-full object-cover hover:scale-105 transition duration-500"
-                          />
-                        </div>
-                        <h3
-                          onClick={() => openProductDetail(activeProducts[0].id)}
-                          className="font-bold text-lg cursor-pointer hover:underline"
-                        >
-                          {activeProducts[0].name}
-                        </h3>
-                        <p className="text-xs opacity-70 mt-1 line-clamp-2">
-                          {activeProducts[0].description}
-                        </p>
-                      </div>
-
-                      <div className="mt-5 pt-4 border-t border-current/10 flex items-center justify-between gap-3">
-                        <div>
-                          <span className="text-xl font-bold">
-                            {formatINR(activeProducts[0].salePrice || activeProducts[0].price)}
-                          </span>
-                          {activeProducts[0].salePrice && (
-                            <span className="text-xs line-through opacity-50 ml-2">
-                              {formatINR(activeProducts[0].price)}
-                            </span>
-                          )}
-                        </div>
-                        <button
-                          onClick={() =>
-                            addToCart(
-                              activeProducts[0].id,
-                              1,
-                              activeProducts[0].colors[0],
-                              activeProducts[0].sizes[0],
-                              !embeddedPreview
-                            )
-                          }
-                          style={{ backgroundColor: theme.accentColor }}
-                          className={`px-4 py-2.5 text-xs font-bold text-white flex items-center gap-1.5 ${btnRadiusClass}`}
-                        >
-                          <ShoppingBag className="w-3.5 h-3.5" /> Quick Add
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Store Trust & Value Strip */}
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
-                  {[
-                    { icon: Truck, title: 'Free Express Shipping', desc: `On all orders above ${formatINR(config.storeSettings.freeShippingThreshold)}` },
-                    { icon: Shield, title: '2-Year Indian Warranty', desc: 'Direct doorstep replacement coverage' },
-                    { icon: RotateCcw, title: '30-Day Easy Returns', desc: 'No-questions-asked pickup from your home' },
-                    { icon: CreditCard, title: 'UPI, Cards & No-Cost EMI', desc: 'Powered by Razorpay, Stripe & Cashfree' },
-                  ].map((perk, idx) => {
-                    const Icon = perk.icon;
-                    return (
-                      <div
-                        key={idx}
-                        style={{ borderRadius: theme.borderRadius }}
-                        className={`p-4 flex items-start gap-3 ${cardStyleClass}`}
-                      >
-                        <div className="p-2 rounded-lg bg-blue-600/10 text-blue-600 shrink-0">
-                          <Icon className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <h4 className="text-xs font-bold">{perk.title}</h4>
-                          <p className="text-[11px] opacity-65 mt-0.5">{perk.desc}</p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-            );
-          }
-
-          if (section.id === 'sec-categories') {
-            return (
-              <section key={section.id} className="max-w-7xl mx-auto px-4 sm:px-6">
-                <div className="flex items-end justify-between mb-6">
-                  <div>
-                    <h2 className="text-2xl font-bold tracking-tight">Shop by Category</h2>
-                    <p className="text-sm opacity-65 mt-1">Curated collections engineered for your daily ritual.</p>
-                  </div>
-                  <button
-                    onClick={() => navigateCatalog('All')}
-                    className="text-sm font-semibold flex items-center gap-1 hover:underline"
-                    style={{ color: theme.accentColor }}
-                  >
-                    All Categories <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-                  {featuredCats.map((cat) => (
-                    <div
-                      key={cat.id}
-                      onClick={() => navigateCatalog(cat.name)}
-                      style={{ borderRadius: theme.borderRadius }}
-                      className="group relative h-60 overflow-hidden cursor-pointer bg-slate-900"
-                    >
-                      <img
-                        src={cat.image}
-                        alt={cat.name}
-                        className="w-full h-full object-cover opacity-75 group-hover:scale-105 transition-transform duration-500"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
-                      <div className="absolute bottom-4 left-4 right-4 text-white">
-                        <h3 className="font-bold text-lg">{cat.name}</h3>
-                        <p className="text-xs text-slate-300 line-clamp-1 mt-0.5">{cat.description}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            );
-          }
-
-          if (section.id === 'sec-trending') {
-            return (
-              <section key={section.id} className="max-w-7xl mx-auto px-4 sm:px-6">
-                <div className="flex items-end justify-between mb-6">
-                  <div>
-                    <h2 className="text-2xl font-bold tracking-tight">Trending Now</h2>
-                    <p className="text-sm opacity-65 mt-1">Most coveted hardware across Bengaluru, Mumbai &amp; Delhi.</p>
-                  </div>
-                  <button
-                    onClick={() => navigateCatalog('All')}
-                    className="text-sm font-semibold flex items-center gap-1 hover:underline"
-                    style={{ color: theme.accentColor }}
-                  >
-                    View Catalog <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                  {trendingProducts.map((p) => (
-                    <ProductCard key={p.id} product={p} />
-                  ))}
-                </div>
-              </section>
-            );
-          }
-
-          if (section.id === 'sec-promos') {
-            const activeBanners = config.promoBanners.filter((b) => b.active);
-            if (!activeBanners.length) return null;
-            return (
-              <section key={section.id} className="max-w-7xl mx-auto px-4 sm:px-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {activeBanners.map((banner) => (
-                    <div
-                      key={banner.id}
-                      style={{ borderRadius: theme.borderRadius }}
-                      className="relative overflow-hidden min-h-[260px] flex items-end p-7 bg-slate-900 text-white"
-                    >
-                      <img
-                        src={banner.image}
-                        alt={banner.title}
-                        className="absolute inset-0 w-full h-full object-cover opacity-50"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent" />
-                      <div className="relative z-10 max-w-md">
-                        <span className="px-2.5 py-0.5 text-[10px] font-bold tracking-wider uppercase bg-white/20 backdrop-blur-xs rounded-full">
-                          {banner.badge}
-                        </span>
-                        <h3 className="text-2xl font-bold mt-2.5">{banner.title}</h3>
-                        <p className="text-sm text-slate-200 mt-1.5">{banner.subtitle}</p>
-                        <button
-                          onClick={() => navigateCatalog('All')}
-                          className={`mt-4 px-5 py-2.5 bg-white text-slate-950 text-xs font-bold hover:bg-slate-100 transition ${btnRadiusClass}`}
-                        >
-                          {banner.ctaText}
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            );
-          }
-
-          if (section.id === 'sec-bestsellers') {
-            return (
-              <section key={section.id} className="max-w-7xl mx-auto px-4 sm:px-6">
-                <div className="flex items-end justify-between mb-6">
-                  <div>
-                    <h2 className="text-2xl font-bold tracking-tight">Best-Selling Essentials</h2>
-                    <p className="text-sm opacity-65 mt-1">Highest rated staples verified by thousands of buyers.</p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                  {bestSellers.map((p) => (
-                    <ProductCard key={p.id} product={p} />
-                  ))}
-                </div>
-              </section>
-            );
-          }
-
-          if (section.id === 'sec-new') {
-            return (
-              <section key={section.id} className="max-w-7xl mx-auto px-4 sm:px-6">
-                <div className="flex items-end justify-between mb-6">
-                  <div>
-                    <h2 className="text-2xl font-bold tracking-tight">New Arrivals</h2>
-                    <p className="text-sm opacity-65 mt-1">Freshly unboxed additions to the Aether catalog.</p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                  {newArrivals.map((p) => (
-                    <ProductCard key={p.id} product={p} />
-                  ))}
-                </div>
-              </section>
-            );
-          }
-
-          if (section.id === 'sec-testimonials') {
-            const reviews = [
-              { name: 'Siddharth Kulkarni', city: 'Pune', product: 'Aether Studio ANC Pro', text: 'The noise cancellation on Mumbai-Bengaluru flights is remarkable. Build quality rivals headphones twice the price.' },
-              { name: 'Ananya Menon', city: 'Bengaluru', product: 'Monolith Keychron Q1', text: 'Tactile acoustics right out of the box. Delivered within 24 hours in Indiranagar with immaculate packaging.' },
-              { name: 'Vikramaditya Rao', city: 'Hyderabad', product: 'Krono Series 8 Titanium', text: '12-day battery life and zero bloatware. Finally a smartwatch that looks like a classic horological piece.' },
-            ];
-            return (
-              <section key={section.id} className="max-w-7xl mx-auto px-4 sm:px-6">
-                <h2 className="text-2xl font-bold tracking-tight mb-6">Verified Collector Reviews</h2>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  {reviews.map((r, i) => (
-                    <div
-                      key={i}
-                      style={{ borderRadius: theme.borderRadius }}
-                      className={`p-6 ${cardStyleClass}`}
-                    >
-                      <div className="flex items-center gap-1 text-amber-400 mb-3">
-                        {[...Array(5)].map((_, idx) => (
-                          <Star key={idx} className="w-4 h-4 fill-current" />
-                        ))}
-                      </div>
-                      <p className="text-sm leading-relaxed opacity-85">“{r.text}”</p>
-                      <div className="mt-4 pt-4 border-t border-current/10 flex items-center justify-between text-xs">
-                        <span className="font-bold">{r.name} • {r.city}</span>
-                        <span className="opacity-60">{r.product}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            );
-          }
-
-          if (section.id === 'sec-newsletter') {
-            return (
-              <section key={section.id} className="max-w-7xl mx-auto px-4 sm:px-6">
-                <div
-                  style={{
-                    borderRadius: theme.borderRadius,
-                    backgroundColor: isDark ? '#171717' : theme.primaryColor,
-                  }}
-                  className="p-8 sm:p-12 text-white flex flex-col lg:flex-row items-center justify-between gap-8"
-                >
-                  <div className="max-w-xl">
-                    <h2 className="text-2xl sm:text-3xl font-bold">Join the Aether Dispatch</h2>
-                    <p className="text-sm text-slate-300 mt-2">
-                      Receive early access to limited-run hardware drops, industrial design notes, and an instant ₹1,000 welcome voucher.
-                    </p>
-                  </div>
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      if (!newsletterEmail) return;
-                      addToast('Subscribed!', 'Check your inbox for code WELCOME10.');
-                      setNewsletterEmail('');
-                    }}
-                    className="w-full lg:w-auto flex flex-col sm:flex-row gap-3"
-                  >
-                    <input
-                      type="email"
-                      required
-                      value={newsletterEmail}
-                      onChange={(e) => setNewsletterEmail(e.target.value)}
-                      placeholder="you@domain.in"
-                      className={`px-4 py-3 bg-white/10 border border-white/20 text-white placeholder:text-slate-400 text-sm min-w-[260px] focus:outline-none ${btnRadiusClass}`}
-                    />
-                    <button
-                      type="submit"
-                      style={{ backgroundColor: theme.accentColor }}
-                      className={`px-6 py-3 text-sm font-semibold text-white hover:brightness-110 transition ${btnRadiusClass}`}
-                    >
-                      Subscribe
-                    </button>
-                  </form>
-                </div>
-              </section>
-            );
-          }
-
-          return null;
-        })}
-      </div>
-    );
-  };
-
-  // --- Storefront Sub-View: Product Listing / Catalog ---
-  const renderCatalog = () => {
-    const [viewMode, setViewMode] = useState('grid');
-    const [page, setPage] = useState(1);
-    const pageSize = 12;
-
-    const filtered = useMemo(() => {
-      return products
-        .filter((p) => p.status !== 'Draft')
-        .filter((p) => catalogFilters.category === 'All' || p.category === catalogFilters.category)
-        .filter((p) => catalogFilters.brand === 'All' || p.brand === catalogFilters.brand)
-        .filter((p) => (p.salePrice || p.price) <= catalogFilters.maxPrice)
-        .filter(
-          (p) =>
-            !catalogFilters.search ||
-            p.name.toLowerCase().includes(catalogFilters.search.toLowerCase()) ||
-            p.category.toLowerCase().includes(catalogFilters.search.toLowerCase())
-        )
-        .sort((a, b) => {
-          const pa = a.salePrice || a.price;
-          const pb = b.salePrice || b.price;
-          if (catalogFilters.sort === 'price-asc') return pa - pb;
-          if (catalogFilters.sort === 'price-desc') return pb - pa;
-          if (catalogFilters.sort === 'rating') return b.rating - a.rating;
-          if (catalogFilters.sort === 'popular') return b.salesCount - a.salesCount;
-          return 0;
-        });
-    }, [products, catalogFilters]);
-
-    const visibleProducts = filtered.slice(0, page * pageSize);
-
-    return (
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-current/10">
-          <div>
-            <div className="flex items-center gap-2 text-xs opacity-60 mb-1">
-              <button onClick={() => setStoreSubView('home')} className="hover:underline">Home</button>
-              <span>/</span>
-              <span>{catalogFilters.category}</span>
-            </div>
-            <h1 className="text-2xl sm:text-3xl font-bold">
-              {catalogFilters.category === 'All' ? 'All Products' : catalogFilters.category}
-            </h1>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <select
-              value={catalogFilters.sort}
-              onChange={(e) => setCatalogFilters((prev) => ({ ...prev, sort: e.target.value }))}
-              className={`px-3.5 py-2 text-sm border rounded-xl ${
-                isDark ? 'bg-neutral-900 border-neutral-700' : 'bg-white border-slate-200'
-              }`}
-            >
-              <option value="featured">Sort: Featured</option>
-              <option value="popular">Most Popular</option>
-              <option value="rating">Highest Rated</option>
-              <option value="price-asc">Price: Low to High</option>
-              <option value="price-desc">Price: High to Low</option>
-            </select>
-
-            <div className="flex items-center border border-current/15 rounded-xl overflow-hidden">
-              <button
-                onClick={() => setViewMode('grid')}
-                className={`p-2 ${viewMode === 'grid' ? 'bg-blue-600 text-white' : 'opacity-60'}`}
-                title="Grid View"
-              >
-                <Grid className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => setViewMode('list')}
-                className={`p-2 ${viewMode === 'list' ? 'bg-blue-600 text-white' : 'opacity-60'}`}
-                title="List View"
-              >
-                <List className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 mt-8">
-          {/* Sidebar Filters */}
-          <aside className="space-y-6">
-            <div>
-              <h3 className="text-xs font-bold uppercase tracking-wider opacity-60 mb-3">Categories</h3>
-              <div className="space-y-1.5">
-                {['All', ...categories.map((c) => c.name)].map((catName) => (
-                  <button
-                    key={catName}
-                    onClick={() => {
-                      setCatalogFilters((prev) => ({ ...prev, category: catName }));
-                      setPage(1);
-                    }}
-                    className={`w-full text-left px-3 py-2 rounded-lg text-sm transition flex items-center justify-between ${
-                      catalogFilters.category === catName
-                        ? 'font-semibold text-white'
-                        : 'opacity-75 hover:opacity-100'
-                    }`}
-                    style={
-                      catalogFilters.category === catName
-                        ? { backgroundColor: theme.accentColor }
-                        : undefined
-                    }
-                  >
-                    <span>{catName}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <h3 className="text-xs font-bold uppercase tracking-wider opacity-60 mb-3">Brand</h3>
-              <select
-                value={catalogFilters.brand}
-                onChange={(e) => setCatalogFilters((prev) => ({ ...prev, brand: e.target.value }))}
-                className={`w-full px-3 py-2 text-sm border rounded-xl ${
-                  isDark ? 'bg-neutral-900 border-neutral-700' : 'bg-white border-slate-200'
-                }`}
-              >
-                <option value="All">All Brands</option>
-                {BRANDS.map((b) => (
-                  <option key={b} value={b}>{b}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider opacity-60 mb-2">
-                <span>Max Price</span>
-                <span>{formatINR(catalogFilters.maxPrice)}</span>
-              </div>
-              <input
-                type="range"
-                min={2000}
-                max={50000}
-                step={1000}
-                value={catalogFilters.maxPrice}
-                onChange={(e) => setCatalogFilters((prev) => ({ ...prev, maxPrice: Number(e.target.value) }))}
-                className="w-full accent-blue-600"
-              />
-              <div className="flex justify-between text-[11px] opacity-50 mt-1">
-                <span>₹2,000</span>
-                <span>₹50,000</span>
-              </div>
-            </div>
-
-            <button
-              onClick={() =>
-                setCatalogFilters({ category: 'All', brand: 'All', maxPrice: 50000, search: '', sort: 'featured' })
-              }
-              className="w-full py-2.5 text-xs font-semibold border border-current/20 rounded-xl hover:bg-current/5"
-            >
-              Reset All Filters
-            </button>
-          </aside>
-
-          {/* Product Grid */}
-          <div className="lg:col-span-3">
-            <p className="text-xs opacity-60 mb-4">
-              Showing {visibleProducts.length} of {filtered.length} products
-            </p>
-
-            {visibleProducts.length === 0 ? (
-              <div className="p-12 text-center border border-dashed border-current/20 rounded-2xl">
-                <Package className="w-10 h-10 mx-auto opacity-40 mb-3" />
-                <h3 className="font-semibold text-lg">No matching products</h3>
-                <p className="text-sm opacity-65 mt-1">Try broadening your price ceiling or clearing search keywords.</p>
-              </div>
-            ) : (
-              <>
-                <div
-                  className={
-                    viewMode === 'grid'
-                      ? 'grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6'
-                      : 'flex flex-col gap-4'
-                  }
-                >
-                  {visibleProducts.map((p) => (
-                    <ProductCard key={p.id} product={p} listView={viewMode === 'list'} />
-                  ))}
-                </div>
-
-                {visibleProducts.length < filtered.length && (
-                  <div className="mt-10 text-center">
-                    <button
-                      onClick={() => setPage((p) => p + 1)}
-                      style={{ backgroundColor: theme.accentColor }}
-                      className={`px-7 py-3 text-sm font-semibold text-white ${btnRadiusClass}`}
-                    >
-                      Load More Products ({filtered.length - visibleProducts.length} remaining)
-                    </button>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  // --- Storefront Sub-View: Product Detail Page ---
-  const renderProductDetail = () => {
-    const product = products.find((p) => p.id === selectedProductId) || products[0];
-    const [activeImg, setActiveImg] = useState(product.image);
-    const [selectedColor, setSelectedColor] = useState(product.colors[0]);
-    const [selectedSize, setSelectedSize] = useState(product.sizes[0]);
-    const [qty, setQty] = useState(1);
-
-    useEffect(() => {
-      setActiveImg(product.image);
-      setSelectedColor(product.colors[0]);
-      setSelectedSize(product.sizes[0]);
-      setQty(1);
-    }, [product]);
-
-    const related = products
-      .filter((p) => p.category === product.category && p.id !== product.id)
-      .slice(0, 4);
-
-    return (
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-        <button
-          onClick={() => setStoreSubView('catalog')}
-          className="inline-flex items-center gap-1.5 text-sm opacity-70 hover:opacity-100 mb-6"
-        >
-          <ChevronLeft className="w-4 h-4" /> Back to Catalog
-        </button>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-          {/* Gallery */}
-          <div className="space-y-4">
-            <div
-              style={{ borderRadius: theme.borderRadius }}
-              className="aspect-square overflow-hidden bg-slate-100 dark:bg-neutral-800"
-            >
-              <img src={activeImg} alt={product.name} className="w-full h-full object-cover" />
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              {product.gallery.map((img, i) => (
-                <button
-                  key={i}
-                  onClick={() => setActiveImg(img)}
-                  style={{ borderRadius: theme.borderRadius }}
-                  className={`aspect-square overflow-hidden border-2 transition ${
-                    activeImg === img ? 'border-blue-600' : 'border-transparent opacity-65 hover:opacity-100'
-                  }`}
-                >
-                  <img src={img} alt="" className="w-full h-full object-cover" />
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Info */}
-          <div className="space-y-6">
-            <div>
-              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider opacity-60">
-                <span>{product.brand}</span>
-                <span>•</span>
-                <span>SKU: {product.sku}</span>
-              </div>
-              <h1 className="text-2xl sm:text-4xl font-bold mt-2">{product.name}</h1>
-
-              <div className="flex items-center gap-4 mt-3">
-                <div className="flex items-center gap-1 text-amber-400 text-sm font-semibold">
-                  <Star className="w-4 h-4 fill-current" />
-                  <span>{product.rating}</span>
-                  <span className="opacity-60 font-normal">({product.reviewCount} reviews)</span>
-                </div>
-                <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 font-medium">
-                  {product.stock > 0 ? `In Stock (${product.stock} available)` : 'Out of Stock'}
-                </span>
-              </div>
-            </div>
-
-            <div className="py-4 border-y border-current/10">
-              {product.salePrice ? (
-                <div className="flex items-baseline gap-3">
-                  <span className="text-3xl font-bold">{formatINR(product.salePrice)}</span>
-                  <span className="text-lg line-through opacity-50">{formatINR(product.price)}</span>
-                  <span className="text-xs font-bold px-2 py-0.5 bg-emerald-600 text-white rounded-md">
-                    Save {formatINR(product.price - product.salePrice)}
-                  </span>
-                </div>
-              ) : (
-                <span className="text-3xl font-bold">{formatINR(product.price)}</span>
-              )}
-              <p className="text-xs opacity-60 mt-1">Inclusive of 18% GST • Free Express Delivery</p>
-            </div>
-
-            <p className="text-sm leading-relaxed opacity-80">{product.description}</p>
-
-            {/* Variants */}
-            <div className="space-y-4">
-              <div>
-                <label className="text-xs font-bold uppercase tracking-wider opacity-70 block mb-2">
-                  Finish: {selectedColor}
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {product.colors.map((c) => (
-                    <button
-                      key={c}
-                      onClick={() => setSelectedColor(c)}
-                      className={`px-4 py-2 text-xs font-medium border transition ${btnRadiusClass} ${
-                        selectedColor === c
-                          ? 'border-blue-600 bg-blue-600/10 font-bold'
-                          : 'border-current/20 opacity-75'
-                      }`}
-                    >
-                      {c}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs font-bold uppercase tracking-wider opacity-70 block mb-2">
-                  Configuration / Size: {selectedSize}
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {product.sizes.map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => setSelectedSize(s)}
-                      className={`px-4 py-2 text-xs font-medium border transition ${btnRadiusClass} ${
-                        selectedSize === s
-                          ? 'border-blue-600 bg-blue-600/10 font-bold'
-                          : 'border-current/20 opacity-75'
-                      }`}
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Quantity & CTA */}
-            <div className="flex flex-wrap items-center gap-4 pt-2">
-              <div className={`flex items-center border border-current/20 ${btnRadiusClass}`}>
-                <button
-                  onClick={() => setQty((q) => Math.max(1, q - 1))}
-                  className="p-3 hover:bg-current/5"
-                >
-                  <Minus className="w-4 h-4" />
-                </button>
-                <span className="px-4 font-semibold text-sm">{qty}</span>
-                <button
-                  onClick={() => setQty((q) => Math.min(product.stock || 10, q + 1))}
-                  className="p-3 hover:bg-current/5"
-                >
-                  <Plus className="w-4 h-4" />
-                </button>
-              </div>
-
-              <button
-                disabled={product.stock === 0}
-                onClick={() => addToCart(product.id, qty, selectedColor, selectedSize, true)}
-                style={{ backgroundColor: theme.accentColor }}
-                className={`flex-1 py-3.5 px-6 text-sm font-semibold text-white hover:brightness-110 transition disabled:opacity-50 ${btnRadiusClass}`}
-              >
-                Add to Shopping Bag
-              </button>
-
-              <button
-                disabled={product.stock === 0}
-                onClick={() => {
-                  addToCart(product.id, qty, selectedColor, selectedSize, false);
-                  setStoreSubView('checkout');
-                }}
-                className={`py-3.5 px-6 text-sm font-semibold border border-current/25 hover:bg-current/5 transition disabled:opacity-50 ${btnRadiusClass}`}
-              >
-                Buy Now
-              </button>
-            </div>
-
-            {/* Specifications */}
-            <div className="pt-6 border-t border-current/10">
-              <h3 className="text-sm font-bold uppercase tracking-wider mb-3">Technical Specifications</h3>
-              <dl className="divide-y divide-current/10 text-sm">
-                {product.specs.map((sp, i) => (
-                  <div key={i} className="py-2.5 flex justify-between gap-4">
-                    <dt className="opacity-60">{sp.label}</dt>
-                    <dd className="font-medium text-right">{sp.value}</dd>
-                  </div>
-                ))}
-              </dl>
-            </div>
-          </div>
-        </div>
-
-        {/* Related Products */}
-        {related.length > 0 && (
-          <div className="mt-16 pt-12 border-t border-current/10">
-            <h2 className="text-2xl font-bold mb-6">Complete Your Setup</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              {related.map((p) => (
-                <ProductCard key={p.id} product={p} />
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // --- Storefront Sub-View: Simulated Checkout ---
-  const renderCheckout = () => {
-    const enabledGateways = config.gateways.filter((g) => g.enabled);
-    const [selectedGateway, setSelectedGateway] = useState(enabledGateways[0]?.name || 'Razorpay');
-    const [shippingMethod, setShippingMethod] = useState('standard');
-    const [customerDetails, setCustomerDetails] = useState({
-      fullName: 'Rohan Deshmukh',
-      email: 'rohan.deshmukh@example.in',
-      phone: '+91 98201 44510',
-      address: '402, Skylark Towers, Koregaon Park',
-      city: 'Pune',
-      state: 'Maharashtra',
-      pincode: '411001',
-    });
-
-    const cartItems = cart
-      .map((item) => {
-        const prod = products.find((p) => p.id === item.productId);
-        return prod ? { ...item, product: prod } : null;
-      })
-      .filter(Boolean);
-
-    const subtotal = cartItems.reduce(
-      (sum, item) => sum + (item.product.salePrice || item.product.price) * item.quantity,
-      0
-    );
-    const discountAmt = appliedCoupon
-      ? appliedCoupon.type === 'Percentage'
-        ? Math.round((subtotal * appliedCoupon.value) / 100)
-        : appliedCoupon.value
-      : 0;
-    const shippingCost =
-      shippingMethod === 'express'
-        ? 299
-        : subtotal >= config.storeSettings.freeShippingThreshold
-        ? 0
-        : 149;
-    const total = Math.max(0, subtotal - discountAmt + shippingCost);
-
-    const handleSubmit = (e) => {
-      e.preventDefault();
-      if (cartItems.length === 0) return;
-      placeSimulatedOrder({
-        customerDetails,
-        shippingMethod,
-        paymentGateway: selectedGateway,
-      });
-    };
-
-    return (
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10">
-        <div className="mb-6 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center gap-3 text-xs text-amber-700 dark:text-amber-300">
-          <Lock className="w-4 h-4 shrink-0" />
-          <span>
-            <strong>Demo Mode Checkout:</strong> No real payment is processed or authorized. Submitting places a simulated order directly into the Admin Dashboard.
-          </span>
-        </div>
-
-        <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          <div className="lg:col-span-7 space-y-6">
-            {/* Shipping Form */}
-            <div style={{ borderRadius: theme.borderRadius }} className={`p-6 ${cardStyleClass}`}>
-              <h2 className="text-lg font-bold mb-4">1. Shipping Information</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-medium opacity-70 mb-1">Full Name</label>
-                  <input
-                    required
-                    value={customerDetails.fullName}
-                    onChange={(e) => setCustomerDetails({ ...customerDetails, fullName: e.target.value })}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-current/20 bg-transparent"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium opacity-70 mb-1">Email Address</label>
-                  <input
-                    type="email"
-                    required
-                    value={customerDetails.email}
-                    onChange={(e) => setCustomerDetails({ ...customerDetails, email: e.target.value })}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-current/20 bg-transparent"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium opacity-70 mb-1">Mobile Number</label>
-                  <input
-                    required
-                    value={customerDetails.phone}
-                    onChange={(e) => setCustomerDetails({ ...customerDetails, phone: e.target.value })}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-current/20 bg-transparent"
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-medium opacity-70 mb-1">Street Address</label>
-                  <input
-                    required
-                    value={customerDetails.address}
-                    onChange={(e) => setCustomerDetails({ ...customerDetails, address: e.target.value })}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-current/20 bg-transparent"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium opacity-70 mb-1">City</label>
-                  <input
-                    required
-                    value={customerDetails.city}
-                    onChange={(e) => setCustomerDetails({ ...customerDetails, city: e.target.value })}
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-current/20 bg-transparent"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium opacity-70 mb-1">State</label>
-                    <input
-                      required
-                      value={customerDetails.state}
-                      onChange={(e) => setCustomerDetails({ ...customerDetails, state: e.target.value })}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-current/20 bg-transparent"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium opacity-70 mb-1">PIN Code</label>
-                    <input
-                      required
-                      value={customerDetails.pincode}
-                      onChange={(e) => setCustomerDetails({ ...customerDetails, pincode: e.target.value })}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-current/20 bg-transparent"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Shipping Method */}
-            <div style={{ borderRadius: theme.borderRadius }} className={`p-6 ${cardStyleClass}`}>
-              <h2 className="text-lg font-bold mb-4">2. Delivery Speed</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                <button
-                  type="button"
-                  onClick={() => setShippingMethod('standard')}
-                  className={`p-4 rounded-xl border text-left transition ${
-                    shippingMethod === 'standard' ? 'border-blue-600 bg-blue-600/10' : 'border-current/20'
-                  }`}
-                >
-                  <div className="flex justify-between font-bold">
-                    <span>Standard Courier</span>
-                    <span>{subtotal >= config.storeSettings.freeShippingThreshold ? 'FREE' : formatINR(149)}</span>
-                  </div>
-                  <p className="text-xs opacity-65 mt-1">3–5 Business Days via BlueDart</p>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShippingMethod('express')}
-                  className={`p-4 rounded-xl border text-left transition ${
-                    shippingMethod === 'express' ? 'border-blue-600 bg-blue-600/10' : 'border-current/20'
-                  }`}
-                >
-                  <div className="flex justify-between font-bold">
-                    <span>Priority Air Express</span>
-                    <span>{formatINR(299)}</span>
-                  </div>
-                  <p className="text-xs opacity-65 mt-1">1–2 Business Days insured delivery</p>
-                </button>
-              </div>
-            </div>
-
-            {/* Payment Gateway Selection */}
-            <div style={{ borderRadius: theme.borderRadius }} className={`p-6 ${cardStyleClass}`}>
-              <h2 className="text-lg font-bold mb-1">3. Simulated Payment Method</h2>
-              <p className="text-xs opacity-65 mb-4">
-                Active gateways are controlled live from Admin → Integrations → Payment Gateways.
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {config.gateways.map((gw) => (
-                  <button
-                    key={gw.id}
-                    type="button"
-                    disabled={!gw.enabled}
-                    onClick={() => setSelectedGateway(gw.name)}
-                    className={`p-4 rounded-xl border text-left transition ${
-                      !gw.enabled
-                        ? 'opacity-40 cursor-not-allowed border-current/15'
-                        : selectedGateway === gw.name
-                        ? 'border-blue-600 bg-blue-600/10'
-                        : 'border-current/20 hover:border-current/40'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-sm">{gw.name}</span>
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-current/10">
-                        {gw.enabled ? `${gw.mode} Mode` : 'Disabled'}
-                      </span>
-                    </div>
-                    <p className="text-xs opacity-65 mt-1">{gw.tagline}</p>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Order Summary */}
-          <div className="lg:col-span-5">
-            <div style={{ borderRadius: theme.borderRadius }} className={`p-6 sticky top-24 ${cardStyleClass}`}>
-              <h2 className="text-lg font-bold mb-4">Order Summary ({cartItems.length})</h2>
-              <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
-                {cartItems.map((item, idx) => (
-                  <div key={idx} className="flex items-center gap-3 text-sm">
-                    <img src={item.product.image} alt="" className="w-12 h-12 rounded-lg object-cover" />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">{item.product.name}</p>
-                      <p className="text-xs opacity-60">Qty {item.quantity} • {item.color}</p>
-                    </div>
-                    <span className="font-semibold">
-                      {formatINR((item.product.salePrice || item.product.price) * item.quantity)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-5 pt-4 border-t border-current/10 space-y-2 text-sm">
-                <div className="flex justify-between opacity-75">
-                  <span>Subtotal</span>
-                  <span>{formatINR(subtotal)}</span>
-                </div>
-                {discountAmt > 0 && (
-                  <div className="flex justify-between text-emerald-600 font-medium">
-                    <span>Discount ({appliedCoupon?.code})</span>
-                    <span>-{formatINR(discountAmt)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between opacity-75">
-                  <span>Shipping</span>
-                  <span>{shippingCost === 0 ? 'FREE' : formatINR(shippingCost)}</span>
-                </div>
-                <div className="flex justify-between text-base font-bold pt-2 border-t border-current/10">
-                  <span>Total Payable (incl. GST)</span>
-                  <span>{formatINR(total)}</span>
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={cartItems.length === 0}
-                style={{ backgroundColor: theme.accentColor }}
-                className={`w-full mt-6 py-4 text-sm font-bold text-white shadow-lg hover:brightness-110 transition ${btnRadiusClass}`}
-              >
-                Simulate Payment via {selectedGateway} • {formatINR(total)}
-              </button>
-            </div>
-          </div>
-        </form>
-      </div>
-    );
-  };
-
-  // --- Storefront Sub-View: Order Confirmation ---
-  const renderConfirmation = () => {
-    const order = lastPlacedOrder || orders[0];
-    return (
-      <div className="max-w-2xl mx-auto px-4 py-16 text-center">
-        <div className="w-16 h-16 rounded-full bg-emerald-500/15 text-emerald-500 flex items-center justify-center mx-auto mb-5">
-          <CheckCircle2 className="w-9 h-9" />
-        </div>
-        <span className="text-xs font-bold uppercase tracking-widest text-emerald-600">
-          Simulated Order Confirmed
-        </span>
-        <h1 className="text-3xl font-bold mt-2">Thank you, {order?.customerName}!</h1>
-        <p className="text-sm opacity-70 mt-2">
-          Your simulated order <strong>{order?.orderNumber}</strong> has been created and synced with the Admin Dashboard &amp; Inventory ledger.
-        </p>
-
-        <div style={{ borderRadius: theme.borderRadius }} className={`mt-8 p-6 text-left ${cardStyleClass}`}>
-          <div className="grid grid-cols-2 gap-4 text-sm pb-4 border-b border-current/10">
-            <div>
-              <span className="text-xs opacity-60 block">Order Reference</span>
-              <span className="font-bold">{order?.orderNumber}</span>
-            </div>
-            <div>
-              <span className="text-xs opacity-60 block">Payment Gateway</span>
-              <span className="font-bold">{order?.paymentMethod} (Simulated)</span>
-            </div>
-            <div>
-              <span className="text-xs opacity-60 block">Delivery Destination</span>
-              <span className="font-medium text-xs">{order?.shippingAddress}</span>
-            </div>
-            <div>
-              <span className="text-xs opacity-60 block">Total Paid</span>
-              <span className="font-bold text-base">{formatINR(order?.total || 0)}</span>
-            </div>
-          </div>
-
-          <div className="mt-4 flex flex-col sm:flex-row gap-3">
-            <button
-              onClick={() => setStoreSubView('home')}
-              style={{ backgroundColor: theme.accentColor }}
-              className={`flex-1 py-3 text-sm font-semibold text-white ${btnRadiusClass}`}
-            >
-              Continue Shopping
-            </button>
-            <button
-              onClick={() => {
-                setAdminSubPage('orders');
-                setRoute('/admin');
-              }}
-              className={`flex-1 py-3 text-sm font-semibold border border-current/25 hover:bg-current/5 ${btnRadiusClass}`}
-            >
-              Inspect Order in Admin →
-            </button>
-          </div>
-        </div>
-      </div>
-    );
   };
 
   return (
@@ -2472,47 +2558,6 @@ const StorefrontExperience = ({ embeddedPreview = false }) => {
       }}
       className="min-h-screen flex flex-col transition-colors duration-200"
     >
-      {/* Top Demo Switcher Strip (hidden when embedded inside Theme/Banner live preview) */}
-      {!embeddedPreview && (
-        <div className="bg-slate-950 text-slate-300 text-xs px-4 py-2 flex flex-wrap items-center justify-between gap-2 border-b border-slate-800">
-          <div className="flex items-center gap-2.5">
-            <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold text-[10px]">
-              LIVE STOREFRONT
-            </span>
-            <span className="hidden md:inline opacity-80">
-              Theme: <strong>{theme.preset}</strong> • {products.length} Live SKUs
-            </span>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setOrderLookupOpen(true)}
-              className="hover:text-white flex items-center gap-1 text-slate-300"
-            >
-              <Package className="w-3.5 h-3.5" /> Track Orders ({orders.length})
-            </button>
-            <button
-              onClick={() => {
-                setAdminSubPage('theme-customizer');
-                setRoute('/admin');
-              }}
-              className="hidden sm:flex items-center gap-1 hover:text-white text-slate-300"
-            >
-              <Palette className="w-3.5 h-3.5" /> Customize Theme
-            </button>
-            <button
-              onClick={() => {
-                setAdminSubPage('dashboard');
-                setRoute('/admin');
-              }}
-              className="px-3 py-1 rounded-md bg-blue-600 text-white font-semibold hover:bg-blue-500 flex items-center gap-1.5 shadow-xs"
-            >
-              <LayoutDashboard className="w-3.5 h-3.5" /> Admin Dashboard
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Announcement Bar */}
       <div
         style={{ backgroundColor: theme.primaryColor }}
         className="text-white text-xs text-center py-2.5 px-4 font-medium"
@@ -2520,7 +2565,6 @@ const StorefrontExperience = ({ embeddedPreview = false }) => {
         {config.announcementBar}
       </div>
 
-      {/* Storefront Header */}
       <header
         className={`sticky top-0 z-30 border-b backdrop-blur-md ${
           isDark ? 'bg-neutral-950/90 border-neutral-800' : 'bg-white/90 border-slate-200/80'
@@ -2529,12 +2573,14 @@ const StorefrontExperience = ({ embeddedPreview = false }) => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <button
+              type="button"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className="lg:hidden p-2 rounded-lg hover:bg-current/5"
             >
               <Menu className="w-5 h-5" />
             </button>
             <button
+              type="button"
               onClick={() => setStoreSubView('home')}
               className="flex items-center gap-2.5 font-bold text-xl tracking-tight"
             >
@@ -2548,12 +2594,12 @@ const StorefrontExperience = ({ embeddedPreview = false }) => {
             </button>
           </div>
 
-          {/* Desktop Navigation (Synced with Admin Navigation Menus) */}
           <nav className="hidden lg:flex items-center gap-6 text-sm font-medium">
             {(config.navigationItems || [])
               .filter((n) => n.visible)
               .map((nav) => (
                 <button
+                  type="button"
                   key={nav.id}
                   onClick={() =>
                     nav.action === 'home' ? setStoreSubView('home') : navigateCatalog(nav.category)
@@ -2565,7 +2611,6 @@ const StorefrontExperience = ({ embeddedPreview = false }) => {
               ))}
           </nav>
 
-          {/* Search, Wishlist, Orders & Cart */}
           <div className="flex items-center gap-2">
             <form onSubmit={handleSearchSubmit} className="hidden sm:flex items-center relative">
               <Search className="w-4 h-4 absolute left-3 opacity-50" />
@@ -2582,6 +2627,19 @@ const StorefrontExperience = ({ embeddedPreview = false }) => {
 
             {!embeddedPreview && (
               <button
+                type="button"
+                onClick={() => setOrderLookupOpen(true)}
+                className="p-2.5 rounded-full hover:bg-current/5 transition"
+                title="Track Orders & Account"
+                aria-label="Track Orders"
+              >
+                <User className="w-5 h-5" />
+              </button>
+            )}
+
+            {!embeddedPreview && (
+              <button
+                type="button"
                 onClick={() => setWishlistDrawerOpen(true)}
                 className="relative p-2.5 rounded-full hover:bg-current/5 transition"
                 title="Saved Wishlist"
@@ -2596,6 +2654,7 @@ const StorefrontExperience = ({ embeddedPreview = false }) => {
             )}
 
             <button
+              type="button"
               onClick={() => setCartOpen(true)}
               className="relative p-2.5 rounded-full hover:bg-current/5 transition"
               aria-label="Shopping Bag"
@@ -2613,17 +2672,16 @@ const StorefrontExperience = ({ embeddedPreview = false }) => {
           </div>
         </div>
 
-        {/* Mobile Category Strip */}
         {mobileMenuOpen && (
           <div className="lg:hidden px-4 py-4 border-t border-current/10 space-y-2">
-            <button onClick={() => { setStoreSubView('home'); setMobileMenuOpen(false); }} className="block w-full text-left py-2 font-medium">
+            <button type="button" onClick={() => { setStoreSubView('home'); setMobileMenuOpen(false); }} className="block w-full text-left py-2 font-medium">
               Home
             </button>
-            <button onClick={() => navigateCatalog('All')} className="block w-full text-left py-2 font-medium">
+            <button type="button" onClick={() => navigateCatalog('All')} className="block w-full text-left py-2 font-medium">
               All Products
             </button>
             {categories.map((c) => (
-              <button key={c.id} onClick={() => navigateCatalog(c.name)} className="block w-full text-left py-1.5 text-sm opacity-80">
+              <button type="button" key={c.id} onClick={() => navigateCatalog(c.name)} className="block w-full text-left py-1.5 text-sm opacity-80">
                 {c.name}
               </button>
             ))}
@@ -2631,16 +2689,30 @@ const StorefrontExperience = ({ embeddedPreview = false }) => {
         )}
       </header>
 
-      {/* Main Content */}
       <main className="flex-1">
-        {storeSubView === 'home' && renderHomepage()}
-        {storeSubView === 'catalog' && renderCatalog()}
-        {storeSubView === 'product' && renderProductDetail()}
-        {storeSubView === 'checkout' && renderCheckout()}
-        {storeSubView === 'confirmation' && renderConfirmation()}
+        {storeSubView === 'home' && (
+          <StorefrontHomepage
+            embeddedPreview={embeddedPreview}
+            onOpenProduct={openProductDetail}
+            onNavigateCatalog={navigateCatalog}
+          />
+        )}
+        {storeSubView === 'catalog' && (
+          <StorefrontCatalog
+            embeddedPreview={embeddedPreview}
+            onOpenProduct={openProductDetail}
+          />
+        )}
+        {storeSubView === 'product' && (
+          <StorefrontProductDetail
+            embeddedPreview={embeddedPreview}
+            onOpenProduct={openProductDetail}
+          />
+        )}
+        {storeSubView === 'checkout' && <StorefrontCheckout />}
+        {storeSubView === 'confirmation' && <StorefrontConfirmation />}
       </main>
 
-      {/* Footer */}
       <footer
         style={{ backgroundColor: isDark ? '#050505' : theme.primaryColor }}
         className="text-slate-300 border-t border-white/10"
@@ -2659,7 +2731,7 @@ const StorefrontExperience = ({ embeddedPreview = false }) => {
                 <ul className="space-y-2 text-xs text-slate-400">
                   {categories.slice(0, 4).map((c) => (
                     <li key={c.id}>
-                      <button onClick={() => navigateCatalog(c.name)} className="hover:text-white">
+                      <button type="button" onClick={() => navigateCatalog(c.name)} className="hover:text-white">
                         {c.name}
                       </button>
                     </li>
@@ -2670,22 +2742,22 @@ const StorefrontExperience = ({ embeddedPreview = false }) => {
                 <h4 className="font-semibold text-white mb-3">Client Care</h4>
                 <ul className="space-y-2 text-xs text-slate-400">
                   <li>
-                    <button onClick={() => setOrderLookupOpen(true)} className="hover:text-white">
+                    <button type="button" onClick={() => setOrderLookupOpen(true)} className="hover:text-white">
                       Track Your Order
                     </button>
                   </li>
                   <li>
-                    <button onClick={() => setActiveInfoModal('shipping')} className="hover:text-white">
+                    <button type="button" onClick={() => setActiveInfoModal('shipping')} className="hover:text-white">
                       Pan-India Insured Shipping
                     </button>
                   </li>
                   <li>
-                    <button onClick={() => setActiveInfoModal('warranty')} className="hover:text-white">
+                    <button type="button" onClick={() => setActiveInfoModal('warranty')} className="hover:text-white">
                       2-Year Hardware Warranty
                     </button>
                   </li>
                   <li>
-                    <button onClick={() => setActiveInfoModal('returns')} className="hover:text-white">
+                    <button type="button" onClick={() => setActiveInfoModal('returns')} className="hover:text-white">
                       30-Day Hassle-Free Returns
                     </button>
                   </li>
@@ -2705,21 +2777,20 @@ const StorefrontExperience = ({ embeddedPreview = false }) => {
           ) : null}
 
           <div className="pt-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-400">
-            <span>© 2026 {config.storeSettings.storeName}. Frontend Interactive Demo.</span>
+            <span>© 2026 {config.storeSettings.storeName}. All rights reserved.</span>
             <div className="flex items-center gap-4">
-              <button onClick={() => setRoute('/admin')} className="hover:text-white underline">
-                Merchant Admin Portal
-              </button>
-              <span>•</span>
               <span>Razorpay</span>
+              <span>•</span>
               <span>Stripe</span>
+              <span>•</span>
               <span>Cashfree</span>
+              <span>•</span>
+              <span>SSL Encrypted Checkout</span>
             </div>
           </div>
         </div>
       </footer>
 
-      {/* Slide-Over Shopping Cart Drawer */}
       {cartOpen && !embeddedPreview && (
         <CartDrawer
           onClose={() => setCartOpen(false)}
@@ -2730,7 +2801,6 @@ const StorefrontExperience = ({ embeddedPreview = false }) => {
         />
       )}
 
-      {/* Quick View Product Modal */}
       {!embeddedPreview && quickViewProductId && (
         <QuickViewModal
           productId={quickViewProductId}
@@ -2742,7 +2812,6 @@ const StorefrontExperience = ({ embeddedPreview = false }) => {
         />
       )}
 
-      {/* Wishlist Modal */}
       {!embeddedPreview && (
         <Modal
           open={wishlistDrawerOpen}
@@ -2769,6 +2838,7 @@ const StorefrontExperience = ({ embeddedPreview = false }) => {
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <button
+                        type="button"
                         onClick={() => {
                           addToCart(p.id, 1, p.colors[0], p.sizes[0], true);
                           setWishlistDrawerOpen(false);
@@ -2777,7 +2847,7 @@ const StorefrontExperience = ({ embeddedPreview = false }) => {
                       >
                         Move to Bag
                       </button>
-                      <button onClick={() => toggleWishlist(p.id)} className="p-1.5 text-rose-500">
+                      <button type="button" onClick={() => toggleWishlist(p.id)} className="p-1.5 text-rose-500">
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
@@ -2789,7 +2859,6 @@ const StorefrontExperience = ({ embeddedPreview = false }) => {
         </Modal>
       )}
 
-      {/* Live Order Tracking & History Modal */}
       {!embeddedPreview && (
         <Modal
           open={orderLookupOpen}
@@ -2832,7 +2901,6 @@ const StorefrontExperience = ({ embeddedPreview = false }) => {
         </Modal>
       )}
 
-      {/* Store Policy Info Modal */}
       {!embeddedPreview && (
         <Modal
           open={Boolean(activeInfoModal)}
@@ -3102,7 +3170,7 @@ const CartDrawer = ({ onClose, onCheckout }) => {
 };
 
 // ============================================================================
-// 6. ADMINISTRATION DASHBOARD (/admin)
+// 5. ADMINISTRATION DASHBOARD (/admin)
 // ============================================================================
 
 const SIDEBAR_GROUPS = [
@@ -3193,7 +3261,7 @@ const AdminDashboardExperience = () => {
     <div className="flex flex-col h-full">
       <div className="h-16 px-4 flex items-center justify-between border-b border-slate-200 dark:border-slate-800 shrink-0">
         <button
-          onClick={() => setRoute('/')}
+          onClick={() => setRoute('/store')}
           className="flex items-center gap-2.5 font-bold text-slate-900 dark:text-white"
         >
           <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center text-sm font-black shrink-0">
@@ -3273,7 +3341,6 @@ const AdminDashboardExperience = () => {
   return (
     <div className={adminDarkMode ? 'dark' : ''}>
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex">
-        {/* Desktop Sidebar */}
         <aside
           className={`hidden lg:block shrink-0 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 transition-all duration-200 ${
             sidebarCollapsed ? 'w-20' : 'w-64'
@@ -3284,7 +3351,6 @@ const AdminDashboardExperience = () => {
           </div>
         </aside>
 
-        {/* Mobile Drawer Sidebar */}
         {mobileNavOpen && (
           <div className="fixed inset-0 z-50 lg:hidden flex bg-black/50">
             <div className="w-64 bg-white dark:bg-slate-900 h-full">
@@ -3294,9 +3360,7 @@ const AdminDashboardExperience = () => {
           </div>
         )}
 
-        {/* Main Workspace */}
         <div className="flex-1 flex flex-col min-w-0">
-          {/* Top Bar */}
           <header className="sticky top-0 z-30 h-16 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-4 sm:px-6 flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <button
@@ -3354,7 +3418,6 @@ const AdminDashboardExperience = () => {
             </div>
           </header>
 
-          {/* Dynamic Admin Module Content */}
           <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-[1600px] w-full mx-auto">
             <AdminModuleRouter />
           </main>
@@ -3365,7 +3428,7 @@ const AdminDashboardExperience = () => {
 };
 
 // ============================================================================
-// 7. ADMIN MODULES IMPLEMENTATION
+// 6. ADMIN MODULES IMPLEMENTATION
 // ============================================================================
 
 const AdminModuleRouter = () => {
@@ -3423,9 +3486,8 @@ const AdminModuleRouter = () => {
   }
 };
 
-// --- MODULE 1: Dashboard Overview ---
 const AdminOverviewModule = () => {
-  const { orders, products, customers, transactions, setAdminSubPage } = useStore();
+  const { orders, products, customers, setAdminSubPage } = useStore();
   const [dateRange, setDateRange] = useState('30d');
 
   const multiplier = dateRange === 'today' ? 0.04 : dateRange === '7d' ? 0.26 : dateRange === '30d' ? 1 : 2.8;
@@ -3454,7 +3516,6 @@ const AdminOverviewModule = () => {
   }, [products]);
 
   const COLORS = ['#2563eb', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'];
-  const topProducts = [...products].sort((a, b) => b.salesCount - a.salesCount).slice(0, 5);
   const lowStock = products.filter((p) => p.stock <= 6).slice(0, 5);
 
   return (
@@ -3487,13 +3548,12 @@ const AdminOverviewModule = () => {
         </div>
       </div>
 
-      {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         {[
-          { label: 'Gross Revenue', value: formatINR(displayRevenue), delta: '+14.2%', up: true, icon: TrendingUp },
-          { label: 'Total Orders', value: displayOrders.toLocaleString('en-IN'), delta: '+8.7%', up: true, icon: ShoppingCart },
-          { label: 'Average Order Value', value: formatINR(displayAov), delta: '+4.1%', up: true, icon: Receipt },
-          { label: 'Active Customers', value: customers.length.toLocaleString('en-IN'), delta: '+12.4%', up: true, icon: Users },
+          { label: 'Gross Revenue', value: formatINR(displayRevenue), delta: '+14.2%', icon: TrendingUp },
+          { label: 'Total Orders', value: displayOrders.toLocaleString('en-IN'), delta: '+8.7%', icon: ShoppingCart },
+          { label: 'Average Order Value', value: formatINR(displayAov), delta: '+4.1%', icon: Receipt },
+          { label: 'Active Customers', value: customers.length.toLocaleString('en-IN'), delta: '+12.4%', icon: Users },
         ].map((kpi, idx) => {
           const Icon = kpi.icon;
           return (
@@ -3517,7 +3577,6 @@ const AdminOverviewModule = () => {
         })}
       </div>
 
-      {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800">
           <div className="flex items-center justify-between mb-4">
@@ -3564,9 +3623,7 @@ const AdminOverviewModule = () => {
         </div>
       </div>
 
-      {/* Operational Lists */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Recent Orders */}
         <div className="lg:col-span-2 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-bold text-base">Recent Orders</h3>
@@ -3600,7 +3657,6 @@ const AdminOverviewModule = () => {
           </div>
         </div>
 
-        {/* Low Stock Warnings */}
         <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-bold text-base flex items-center gap-2">
@@ -3629,7 +3685,6 @@ const AdminOverviewModule = () => {
   );
 };
 
-// --- MODULE 2: Analytics ---
 const AdminAnalyticsModule = () => {
   return (
     <div className="space-y-6">
@@ -3673,7 +3728,6 @@ const AdminAnalyticsModule = () => {
   );
 };
 
-// --- MODULE 3: Product Management (CRUD + Storefront Sync) ---
 const AdminProductsModule = () => {
   const { products, setProducts, categories, addToast } = useStore();
   const [search, setSearch] = useState('');
@@ -3799,7 +3853,6 @@ const AdminProductsModule = () => {
         </button>
       </div>
 
-      {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
@@ -3822,7 +3875,6 @@ const AdminProductsModule = () => {
         </select>
       </div>
 
-      {/* Product Table */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left">
@@ -3895,7 +3947,6 @@ const AdminProductsModule = () => {
         </div>
       </div>
 
-      {/* Add/Edit Product Modal */}
       <Modal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
@@ -4015,7 +4066,6 @@ const AdminProductsModule = () => {
         </form>
       </Modal>
 
-      {/* Delete Confirmation Dialog */}
       <Modal
         open={Boolean(deleteConfirmId)}
         onClose={() => setDeleteConfirmId(null)}
@@ -4038,7 +4088,6 @@ const AdminProductsModule = () => {
   );
 };
 
-// --- MODULE 4: Categories ---
 const AdminCategoriesModule = () => {
   const { categories, setCategories, addToast } = useStore();
   const [newName, setNewName] = useState('');
@@ -4118,7 +4167,6 @@ const AdminCategoriesModule = () => {
   );
 };
 
-// --- MODULE 5: Inventory Management ---
 const AdminInventoryModule = () => {
   const { products, setProducts, addToast } = useStore();
 
@@ -4193,7 +4241,6 @@ const AdminInventoryModule = () => {
   );
 };
 
-// --- MODULE 6: Orders Management ---
 const AdminOrdersModule = () => {
   const { orders, setOrders, addToast } = useStore();
   const [statusFilter, setStatusFilter] = useState('All');
@@ -4283,7 +4330,6 @@ const AdminOrdersModule = () => {
         </div>
       </div>
 
-      {/* Order Detail Modal */}
       <Modal
         open={Boolean(selectedOrder)}
         onClose={() => setSelectedOrder(null)}
@@ -4344,7 +4390,6 @@ const AdminOrdersModule = () => {
   );
 };
 
-// --- MODULE 7: Purchases ---
 const AdminPurchasesModule = () => {
   const { purchases, setPurchases, addToast } = useStore();
 
@@ -4403,7 +4448,6 @@ const AdminPurchasesModule = () => {
   );
 };
 
-// --- MODULE 8: Customers ---
 const AdminCustomersModule = () => {
   const { customers } = useStore();
   const [search, setSearch] = useState('');
@@ -4477,7 +4521,6 @@ const AdminCustomersModule = () => {
   );
 };
 
-// --- MODULE 9: Discounts ---
 const AdminDiscountsModule = () => {
   const { discounts, setDiscounts, addToast } = useStore();
   const [code, setCode] = useState('');
@@ -4560,7 +4603,6 @@ const AdminDiscountsModule = () => {
   );
 };
 
-// --- MODULE 10: Website & Hero Banner Visual Editor with Live Preview ---
 const AdminWebsiteBannerEditorModule = ({ initialTab = 'sections' }) => {
   const { config, setConfig, addToast, setRoute } = useStore();
   const [tab, setTab] = useState(initialTab);
@@ -4623,7 +4665,6 @@ const AdminWebsiteBannerEditorModule = ({ initialTab = 'sections' }) => {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-        {/* Controls Column */}
         <div className="xl:col-span-5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 space-y-5">
           <div className="flex gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
             {[
@@ -4783,7 +4824,6 @@ const AdminWebsiteBannerEditorModule = ({ initialTab = 'sections' }) => {
           )}
         </div>
 
-        {/* Live Storefront Preview Frame */}
         <div className="xl:col-span-7 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col">
           <div className="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between text-xs">
             <div className="flex items-center gap-1.5">
@@ -4803,7 +4843,6 @@ const AdminWebsiteBannerEditorModule = ({ initialTab = 'sections' }) => {
   );
 };
 
-// --- MODULE 11: Theme Customizer with Presets & Live Storefront Preview ---
 const AdminThemeCustomizerModule = () => {
   const { config, setConfig, addToast } = useStore();
   const theme = config.theme;
@@ -4830,7 +4869,6 @@ const AdminThemeCustomizerModule = () => {
         <p className="text-sm text-slate-500">Switch curated presets or fine-tune brand colors, typography, radii, and dark mode.</p>
       </div>
 
-      {/* Presets Bar */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {Object.keys(THEME_PRESETS).map((name) => {
           const p = THEME_PRESETS[name];
@@ -4861,7 +4899,6 @@ const AdminThemeCustomizerModule = () => {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-        {/* Token Controls */}
         <div className="xl:col-span-4 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 text-xs">
           <h3 className="font-bold text-sm">Design Tokens</h3>
 
@@ -4944,7 +4981,6 @@ const AdminThemeCustomizerModule = () => {
           </div>
         </div>
 
-        {/* Live Preview */}
         <div className="xl:col-span-8 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
           <div className="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-xs font-medium flex justify-between">
             <span>Live Theme Preview</span>
@@ -4959,12 +4995,10 @@ const AdminThemeCustomizerModule = () => {
   );
 };
 
-// --- MODULE 12: SEO Manager ---
 const AdminSeoManagerModule = () => {
   const { config, setConfig, products, addToast } = useStore();
   const seo = config.seo;
 
-  // Heuristic SEO Health Score calculation
   const auditChecks = useMemo(() => {
     const checks = [
       { label: 'Global Meta Title length (30–65 chars)', pass: seo.siteTitle.length >= 30 && seo.siteTitle.length <= 65 },
@@ -5030,7 +5064,6 @@ const AdminSeoManagerModule = () => {
             </div>
           </div>
 
-          {/* Search Engine Result Preview */}
           <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
             <span className="text-[10px] uppercase font-bold text-slate-400">Google Search Snippet Preview</span>
             <p className="text-xs text-emerald-700 dark:text-emerald-400 mt-1">{seo.canonicalBase}/store</p>
@@ -5041,7 +5074,6 @@ const AdminSeoManagerModule = () => {
           </div>
         </div>
 
-        {/* Heuristic Health Panel */}
         <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="font-bold">SEO Health Score</h3>
@@ -5077,7 +5109,6 @@ const AdminSeoManagerModule = () => {
   );
 };
 
-// --- MODULE 13: Payment Gateways Integration ---
 const AdminPaymentGatewaysModule = () => {
   const { config, setConfig, addToast } = useStore();
   const [configuringId, setConfiguringId] = useState(null);
@@ -5218,7 +5249,6 @@ const AdminPaymentGatewaysModule = () => {
   );
 };
 
-// --- MODULE 14: Transactions ---
 const AdminTransactionsModule = () => {
   const { transactions } = useStore();
   const [gatewayFilter, setGatewayFilter] = useState('All');
@@ -5281,7 +5311,6 @@ const AdminTransactionsModule = () => {
   );
 };
 
-// --- MODULE 15: Zoho Books Accounting Integration ---
 const AdminZohoBooksModule = () => {
   const { config, setConfig, orders, addToast } = useStore();
   const zb = config.zohoBooks;
@@ -5327,7 +5356,6 @@ const AdminZohoBooksModule = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Connection & Toggles */}
         <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-5">
           <div className="flex items-start justify-between">
             <div>
@@ -5380,7 +5408,6 @@ const AdminZohoBooksModule = () => {
           </div>
         </div>
 
-        {/* Invoice Mapping Preview */}
         <div className="lg:col-span-2 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-5">
           <div>
             <h3 className="font-bold text-base">Live GST Invoice Mapping Preview</h3>
@@ -5424,7 +5451,6 @@ const AdminZohoBooksModule = () => {
   );
 };
 
-// --- Remaining Admin Modules (Fully Implemented) ---
 const AdminPagesModule = () => {
   const { addToast } = useStore();
   const [pages, setPages] = useState([
@@ -5796,7 +5822,7 @@ const AdminActivityLogsModule = () => {
 };
 
 // ============================================================================
-// 8. ROOT APPLICATION SHELL
+// 7. ROOT APPLICATION SHELL
 // ============================================================================
 
 const MainRouter = () => {
